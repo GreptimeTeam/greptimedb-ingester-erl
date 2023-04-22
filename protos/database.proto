@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package greptime.v1;
+
+option java_package = "io.greptime.v1";
+option java_outer_classname = "Database";
+option go_package = "github.com/GreptimeTeam/greptime-proto/go/greptime/v1";
+
+import "protos/ddl.proto";
+import "protos/column.proto";
+import "protos/prom.proto";
+import "protos/common.proto";
+
+service GreptimeDatabase {
+  rpc Handle(GreptimeRequest) returns (GreptimeResponse);
+
+  rpc HandleRequests(stream GreptimeRequest) returns (GreptimeResponse);
+}
+
+message GreptimeRequest {
+  RequestHeader header = 1;
+  oneof request {
+    InsertRequest insert = 2;
+    QueryRequest query = 3;
+    DdlRequest ddl = 4;
+  }
+}
+
+message GreptimeResponse {
+  ResponseHeader header = 1;
+  oneof response {
+    AffectedRows affected_rows = 2;
+  }
+}
+
+message QueryRequest {
+  oneof query {
+    string sql = 1;
+    bytes logical_plan = 2;
+    PromRangeQuery prom_range_query = 3;
+  }
+}
+
+message InsertRequest {
+  string table_name = 1;
+
+  // Data is represented here.
+  repeated Column columns = 3;
+
+  // The row_count of all columns, which include null and non-null values.
+  //
+  // Note: the row_count of all columns in a InsertRequest must be same.
+  uint32 row_count = 4;
+
+  // The region number of current insert request.
+  uint32 region_number = 5;
+}

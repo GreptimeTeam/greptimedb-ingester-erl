@@ -1,3 +1,3 @@
--module(greptimedb-client-erl).
+-module('greptimedb-client-erl').
 
 -export([]).
