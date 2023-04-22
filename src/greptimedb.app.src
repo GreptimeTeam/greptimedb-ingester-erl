@@ -1,5 +1,5 @@
-{application, 'greptimedb-client-erl',
- [{description, "An OTP library"},
+{application, greptimedb,
+ [{description, "A client library for GreptimeDB"},
   {vsn, "0.1.0"},
   {registered, []},
   {applications,
