@@ -37,12 +37,8 @@ jobs:
         rebar3 ct --cover
     - name: Dialyzer
       run: rebar3 dialyzer
-    - name: Covertool
-      run: rebar3 covertool generate
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v2
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
-        file: _build/test/covertool/greptimedb.covertool.xml
-        env_vars: 25.3
+    - name: Coveralls
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+      run: rebar3 as test coveralls send
