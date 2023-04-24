@@ -33,5 +33,6 @@ jobs:
       run: rebar3 compile
     - name: Run tests
       run: |
+        ls -al /tmp/greptimedb-download/
         cat /tmp/greptimedb.log
         rebar3 ct --verbose
