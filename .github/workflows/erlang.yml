@@ -40,7 +40,7 @@ jobs:
     - name: Covertool
       run: rebar3 covertool generate
     - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v2
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         fail_ci_if_error: false
