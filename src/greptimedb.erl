@@ -1,6 +1,12 @@
 -module(greptimedb).
 
--export([start_client/1, collect_columns/1, send/0]).
+-export([start_client/1, send/2, ddl/0]).
+
+-ifdef(TEST).
+
+-export([collect_columns/1]).
+
+-endif.
 
 -define(TS_COLUMN, "greptime_timestamp").
 
@@ -12,55 +18,130 @@ start_client(#{endpoints := Endpoints} = Options) ->
                               [{default_channel,
                                 lists:map(fun({Schema, Host, Port}) -> {Schema, Host, Port, []} end,
                                           Endpoints),
-                                maps:get(Options, options, #{})}]}),
+                                maps:get(options, Options, #{})}]}),
     application:ensure_all_started(grpcbox).
 
-send() ->
+send({Catalog, Schema, Table}, Points) ->
+    RowCount = length(Points),
     Columns =
-        greptimedb:collect_columns(#{fields => [],
-                                     tags => [],
-                                     timestamp => 1}),
+        lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Points)),
     greptime_v_1_greptime_database_client:handle(#{header =>
-                                                       #{catalog => "greptime", schema => "public"},
+                                                       #{catalog => Catalog, schema => Schema},
                                                    request =>
                                                        {insert,
-                                                        #{table_name => "test",
+                                                        #{table_name => Table,
                                                           columns => Columns,
-                                                          row_count => 1}}}).
+                                                          row_count => RowCount}}});
+send(Metric, Points) ->
+    send({"greptime", "public", Metric}, Points).
 
 ddl() ->
-    ok.
+    todo.
 
-%% convert a point to columns in pb format
+values_size(#{i8_values := Values}) ->
+    length(Values);
+values_size(#{i16_values := Values}) ->
+    length(Values);
+values_size(#{i32_values := Values}) ->
+    length(Values);
+values_size(#{i64_values := Values}) ->
+    length(Values);
+values_size(#{u8_values := Values}) ->
+    length(Values);
+values_size(#{u16_values := Values}) ->
+    length(Values);
+values_size(#{u32_values := Values}) ->
+    length(Values);
+values_size(#{u64_values := Values}) ->
+    length(Values);
+values_size(#{f32_values := Values}) ->
+    length(Values);
+values_size(#{f64_values := Values}) ->
+    length(Values);
+values_size(#{bool_values := Values}) ->
+    length(Values);
+values_size(#{binary_values := Values}) ->
+    length(Values);
+values_size(#{string_values := Values}) ->
+    length(Values);
+values_size(#{date_values := Values}) ->
+    length(Values);
+values_size(#{ts_second_values := Values}) ->
+    length(Values);
+values_size(#{ts_millisecond_values := Values}) ->
+    length(Values);
+values_size(#{ts_nanosecond_values := Values}) ->
+    length(Values).
+
+pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
+    ValuesSize = values_size(Values),
+    NewColumn =
+        if ValuesSize == RowCount ->
+               maps:remove(null_mask, Column);
+           true ->
+               Pad = 8 - (bit_size(NullMask) - floor(bit_size(NullMask) / 8) * 8),
+               Column#{null_mask => <<0:Pad/integer, NullMask/bits>>}
+        end,
+    NewColumn.
+
 convert_columns(#{fields := Fields,
                   tags := Tags,
                   timestamp := Ts}) ->
     TsColumn = ts_column(Ts),
-    FieldsAndTsColumns =
-        maps:fold(fun(K, V1, Acc) ->
-                     V2 = field_column(K, V1),
-                     [V2 | Acc]
-                  end,
-                  [TsColumn],
-                  Fields),
+    FieldColumns = maps:map(fun(K, V) -> field_column(K, V) end, Fields),
+    TagColumns = maps:map(fun(K, V) -> tag_column(K, V) end, Tags),
+    maps:put(
+        maps:get(column_name, TsColumn), TsColumn, maps:merge(FieldColumns, TagColumns)).
 
-    Columns =
-        maps:fold(fun(K, V1, Acc) ->
-                     V2 = tag_column(K, V1),
-                     [V2 | Acc]
-                  end,
-                  FieldsAndTsColumns,
-                  Tags),
+merge_column(#{null_mask := NullMask} = Column, NewColumn) ->
+    Values = maps:get(values, Column, #{}),
+    NewValues = maps:get(values, NewColumn),
+    MergedValues =
+        maps:merge_with(fun(_K, V1, V2) -> lists:foldr(fun(X, XS) -> [X | XS] end, V2, V1) end,
+                        Values,
+                        NewValues),
+    NewColumn1 = maps:merge(Column, NewColumn),
+    NewColumn1#{values => MergedValues, null_mask => <<NullMask/bits, 1:1/integer>>}.
 
-    Columns.
+merge_columns(NextColumns, Columns) ->
+    maps:fold(fun(Name, #{null_mask := NullMask} = Column, AccColumns) ->
+                 MergedColumn =
+                     case maps:find(Name, NextColumns) of
+                         {ok, NewColumn} ->
+                             merge_column(Column, NewColumn);
+                         _ ->
+                             Column#{null_mask => <<NullMask/bits, 0:1/integer>>}
+                     end,
+                 AccColumns#{Name => MergedColumn}
+              end,
+              Columns,
+              Columns).
 
-collect_columns(List) ->
-    collect_columns(List, #{}).
+empty_column() ->
+    #{null_mask => <<>>}.
 
-collect_columns([], Acc) ->
-    Acc;
-collect_columns([#{} | T], Acc) ->
-    collect_columns(T, Acc).
+merge_columns(Columns) ->
+    Names =
+        sets:to_list(
+            sets:union(
+                lists:map(fun(C) ->
+                             sets:from_list(
+                                 maps:keys(C))
+                          end,
+                          Columns))),
+    EmptyColumns =
+        maps:from_list(
+            lists:map(fun(Name) -> {Name, empty_column()} end, Names)),
+    lists:foldl(fun merge_columns/2, EmptyColumns, Columns).
+
+%% collect columns from points
+collect_columns(Points) ->
+    collect_columns(Points, []).
+
+collect_columns([], Columns) ->
+    maps:values(merge_columns(Columns));
+collect_columns([Point | T], Columns) ->
+    collect_columns(T, [convert_columns(Point) | Columns]).
 
 ts_column(Ts) when is_map(Ts) ->
     maps:merge(#{column_name => ?TS_COLUMN, semantic_type => 'TIMESTAMP'}, Ts);

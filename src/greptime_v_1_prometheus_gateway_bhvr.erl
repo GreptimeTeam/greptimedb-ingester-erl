@@ -8,5 +8,6 @@
 -module(greptime_v_1_prometheus_gateway_bhvr).
 
 %% Unary RPC
--callback handle(ctx:t(), prom_pb:promql_request()) ->
-                    {ok, prom_pb:promql_response(), ctx:t()} | grpcbox_stream:grpc_error_response().
+-callback handle(ctx:t(), database_pb:promql_request()) ->
+    {ok, database_pb:promql_response(), ctx:t()} | grpcbox_stream:grpc_error_response().
+

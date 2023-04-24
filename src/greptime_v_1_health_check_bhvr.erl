@@ -9,5 +9,5 @@
 
 %% Unary RPC
 -callback health_check(ctx:t(), health_pb:health_check_request()) ->
-                          {ok, health_pb:health_check_response(), ctx:t()} |
-                          grpcbox_stream:grpc_error_response().
+    {ok, health_pb:health_check_response(), ctx:t()} | grpcbox_stream:grpc_error_response().
+
