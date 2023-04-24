@@ -24,7 +24,7 @@ jobs:
       run: |
         GREPTIMEDB_VER=v0.2.0
         DOWNLOAD_URL=https://github.com/GreptimeTeam/greptimedb
-        curl -L ${DOWNLOAD_URL}/releases/download/${GREPTIMEDB_VER}/greptime-darwin-amd64.tgz -o /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
+        curl -L ${DOWNLOAD_URL}/releases/download/${GREPTIMEDB_VER}/greptime-linux-amd64.tgz -o /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
         mkdir -p /tmp/greptimedb-download
         tar xzvf /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz -C /tmp/greptimedb-download
         rm -f /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
@@ -33,6 +33,9 @@ jobs:
       run: rebar3 compile
     - name: Run tests
       run: |
-        ls -al /tmp/greptimedb-download/
         cat /tmp/greptimedb.log
-        rebar3 ct --verbose
+        rebar3 ct --cover
+    - name: Dialyzer
+      run: rebar3 dialyzer
+    - name: Covertool
+      run: rebar3 covertool generate
