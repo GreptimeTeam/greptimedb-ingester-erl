@@ -9,5 +9,4 @@
 
 %% Unary RPC
 -callback handle(ctx:t(), prom_pb:promql_request()) ->
-    {ok, prom_pb:promql_response(), ctx:t()} | grpcbox_stream:grpc_error_response().
-
+                    {ok, prom_pb:promql_response(), ctx:t()} | grpcbox_stream:grpc_error_response().

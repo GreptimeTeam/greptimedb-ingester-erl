@@ -1,14 +1,10 @@
-{application, greptimedb,
+{application,
+ greptimedb,
  [{description, "A client library for GreptimeDB"},
   {vsn, "0.1.0"},
   {registered, []},
-  {applications,
-   [kernel,
-    stdlib
-   ]},
-  {env,[]},
+  {applications, [kernel, stdlib]},
+  {env, []},
   {modules, []},
-
   {licenses, ["Apache-2.0"]},
-  {links, []}
- ]}.
+  {links, []}]}.

@@ -9,9 +9,9 @@
 
 %% Unary RPC
 -callback handle(ctx:t(), database_pb:greptime_request()) ->
-    {ok, database_pb:greptime_response(), ctx:t()} | grpcbox_stream:grpc_error_response().
-
-%% 
+                    {ok, database_pb:greptime_response(), ctx:t()} |
+                    grpcbox_stream:grpc_error_response().
+%%
 -callback handle_requests(reference(), grpcbox_stream:t()) ->
-    {ok, database_pb:greptime_response(), ctx:t()} | grpcbox_stream:grpc_error_response().
-
+                             {ok, database_pb:greptime_response(), ctx:t()} |
+                             grpcbox_stream:grpc_error_response().
