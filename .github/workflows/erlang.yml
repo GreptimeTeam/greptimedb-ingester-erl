@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: erlang:22.0.7
+      image: erlang:25.3
 
     steps:
     - uses: actions/checkout@v3
@@ -28,8 +28,7 @@ jobs:
         mkdir -p /tmp/greptimedb-download
         tar xzvf /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz -C /tmp/greptimedb-download
         rm -f /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
-        cp -a /tmp/greptimedb-download/greptime* /usr/local/bin/
-        nohup greptime standalone start>/tmp/greptimedb.log 2>&1 &
+        nohup /tmp/greptimedb-download/greptime standalone start > /tmp/greptimedb.log 2>&1 &
     - name: Compile
       run: rebar3 compile
     - name: Run tests
