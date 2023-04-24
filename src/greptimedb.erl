@@ -3,12 +3,12 @@
 -export([start_client/1, send/2, ddl/0]).
 
 -ifdef(TEST).
-
 -export([collect_columns/1]).
-
 -endif.
 
 -define(TS_COLUMN, "greptime_timestamp").
+-define(DEFAULT_CATALOG, "greptime").
+-define(DEFAULT_SCHEMA, "public").
 
 start_client(#{endpoints := Endpoints} = Options) ->
     application:load(grpcbox),
@@ -33,7 +33,7 @@ send({Catalog, Schema, Table}, Points) ->
                                                           columns => Columns,
                                                           row_count => RowCount}}});
 send(Metric, Points) ->
-    send({"greptime", "public", Metric}, Points).
+    send({?DEFAULT_CATALOG, ?DEFAULT_SCHEMA, Metric}, Points).
 
 ddl() ->
     todo.
