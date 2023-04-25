@@ -34,6 +34,20 @@ write(#{protocol := Protocol} = Client, Metric, Points) ->
             {error, R}
     end.
 
+ddl(_Client) ->
+    todo.
+
+-spec stop_client(Client :: map()) -> ok | term().
+stop_client(#{pool := Pool, protocol := Protocol}) ->
+    case Protocol of
+        http ->
+            ecpool:stop_sup_pool(Pool)
+    end.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
 rpc_call(#{pool := Pool} = _Client, Request) ->
     Fun = fun(Worker) -> greptimedb_worker:rpc_call(Worker, Request) end,
     try
@@ -42,14 +56,4 @@ rpc_call(#{pool := Pool} = _Client, Request) ->
         E:R:S ->
             logger:error("[GreptimeDB] grpc write fail: ~0p ~0p ~0p", [E, R, S]),
             {error, {E, R}}
-    end.
-
-ddl(_Client) ->
-    ok.
-
--spec stop_client(Client :: map()) -> ok | term().
-stop_client(#{pool := Pool, protocol := Protocol}) ->
-    case Protocol of
-        http ->
-            ecpool:stop_sup_pool(Pool)
     end.
