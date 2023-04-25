@@ -32,7 +32,8 @@ t_collect_columns(_) ->
                  <<"region">> => <<"ningbo">>,
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],
-    Columns = greptimedb:collect_columns(Points),
+    Metric = "Test",
+    Columns = greptimedb_encoder:insert_request(Metric, Points),
     ct:print("~w~n", [Columns]),
     ok.
 
@@ -53,6 +54,13 @@ t_send(_) ->
                  <<"region">> => <<"ningbo">>,
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],
-    {ok, _} = greptimedb:start_client(#{endpoints => [{http, "localhost", 4001}]}),
-    {ok, #{response := {affected_rows, #{value := 2}}}, _} = greptimedb:send(Metric, Points),
+    Options =
+        [{endpoints, [{http, "localhost", 4001}]},
+         {pool, greptimedb_client_pool},
+         {pool_size, 8},
+         {pool_type, random}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    {ok, #{response := {affected_rows, #{value := 2}}}} =
+        greptimedb:write(Client, Metric, Points),
     ok.

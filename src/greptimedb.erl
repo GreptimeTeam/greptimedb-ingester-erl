@@ -1,168 +1,59 @@
 -module(greptimedb).
 
--export([start_client/1, send/2, ddl/0]).
+-export([start_client/1, stop_client/1, write/3, ddl/1]).
 
--ifdef(TEST).
--export([collect_columns/1]).
--endif.
+-spec start_client(list()) ->
+                      {ok, Client :: map()} |
+                      {error, {already_started, Client :: map()}} |
+                      {error, Reason :: term()}.
+start_client(Options0) ->
+    Pool = proplists:get_value(pool, Options0),
+    Options = lists:keydelete(protocol, 1, lists:keydelete(pool, 1, Options0)),
 
--define(TS_COLUMN, "greptime_timestamp").
--define(DEFAULT_CATALOG, "greptime").
--define(DEFAULT_SCHEMA, "public").
+    Client = #{pool => Pool, protocol => http},
+    case ecpool:start_sup_pool(Pool, greptimedb_worker, Options) of
+        {ok, _} ->
+            {ok, Client};
+        {error, {already_started, _}} ->
+            {error, {already_started, Client}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
-start_client(#{endpoints := Endpoints} = Options) ->
-    application:load(grpcbox),
-    application:set_env(grpcbox,
-                        client,
-                        #{channels =>
-                              [{default_channel,
-                                lists:map(fun({Schema, Host, Port}) -> {Schema, Host, Port, []} end,
-                                          Endpoints),
-                                maps:get(options, Options, #{})}]}),
-    application:ensure_all_started(grpcbox).
+write(#{protocol := Protocol} = Client, Metric, Points) ->
+    try
+        case Protocol of
+            http ->
+                Request = greptimedb_encoder:insert_request(Metric, Points),
+                rpc_call(Client, Request)
+        end
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] write ~0p failed: ~0p ~0p ~0p ~p",
+                         [Metric, Points, E, R, S]),
+            {error, R}
+    end.
 
-send({Catalog, Schema, Table}, Points) ->
-    RowCount = length(Points),
-    Columns =
-        lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Points)),
-    greptime_v_1_greptime_database_client:handle(#{header =>
-                                                       #{catalog => Catalog, schema => Schema},
-                                                   request =>
-                                                       {insert,
-                                                        #{table_name => Table,
-                                                          columns => Columns,
-                                                          row_count => RowCount}}});
-send(Metric, Points) ->
-    send({?DEFAULT_CATALOG, ?DEFAULT_SCHEMA, Metric}, Points).
-
-ddl() ->
+ddl(_Client) ->
     todo.
 
-values_size(#{i8_values := Values}) ->
-    length(Values);
-values_size(#{i16_values := Values}) ->
-    length(Values);
-values_size(#{i32_values := Values}) ->
-    length(Values);
-values_size(#{i64_values := Values}) ->
-    length(Values);
-values_size(#{u8_values := Values}) ->
-    length(Values);
-values_size(#{u16_values := Values}) ->
-    length(Values);
-values_size(#{u32_values := Values}) ->
-    length(Values);
-values_size(#{u64_values := Values}) ->
-    length(Values);
-values_size(#{f32_values := Values}) ->
-    length(Values);
-values_size(#{f64_values := Values}) ->
-    length(Values);
-values_size(#{bool_values := Values}) ->
-    length(Values);
-values_size(#{binary_values := Values}) ->
-    length(Values);
-values_size(#{string_values := Values}) ->
-    length(Values);
-values_size(#{date_values := Values}) ->
-    length(Values);
-values_size(#{ts_second_values := Values}) ->
-    length(Values);
-values_size(#{ts_millisecond_values := Values}) ->
-    length(Values);
-values_size(#{ts_nanosecond_values := Values}) ->
-    length(Values).
+-spec stop_client(Client :: map()) -> ok | term().
+stop_client(#{pool := Pool, protocol := Protocol}) ->
+    case Protocol of
+        http ->
+            ecpool:stop_sup_pool(Pool)
+    end.
 
-pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
-    ValuesSize = values_size(Values),
-    NewColumn =
-        if ValuesSize == RowCount ->
-               maps:remove(null_mask, Column);
-           true ->
-               Pad = 8 - (bit_size(NullMask) - floor(bit_size(NullMask) / 8) * 8),
-               Column#{null_mask => <<0:Pad/integer, NullMask/bits>>}
-        end,
-    NewColumn.
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
-convert_columns(#{fields := Fields,
-                  tags := Tags,
-                  timestamp := Ts}) ->
-    TsColumn = ts_column(Ts),
-    FieldColumns = maps:map(fun(K, V) -> field_column(K, V) end, Fields),
-    TagColumns = maps:map(fun(K, V) -> tag_column(K, V) end, Tags),
-    maps:put(
-        maps:get(column_name, TsColumn), TsColumn, maps:merge(FieldColumns, TagColumns)).
-
-merge_column(#{null_mask := NullMask} = Column, NewColumn) ->
-    Values = maps:get(values, Column, #{}),
-    NewValues = maps:get(values, NewColumn),
-    MergedValues =
-        maps:merge_with(fun(_K, V1, V2) -> lists:foldr(fun(X, XS) -> [X | XS] end, V2, V1) end,
-                        Values,
-                        NewValues),
-    NewColumn1 = maps:merge(Column, NewColumn),
-    NewColumn1#{values => MergedValues, null_mask => <<NullMask/bits, 1:1/integer>>}.
-
-merge_columns(NextColumns, Columns) ->
-    maps:fold(fun(Name, #{null_mask := NullMask} = Column, AccColumns) ->
-                 MergedColumn =
-                     case maps:find(Name, NextColumns) of
-                         {ok, NewColumn} ->
-                             merge_column(Column, NewColumn);
-                         _ ->
-                             Column#{null_mask => <<NullMask/bits, 0:1/integer>>}
-                     end,
-                 AccColumns#{Name => MergedColumn}
-              end,
-              Columns,
-              Columns).
-
-empty_column() ->
-    #{null_mask => <<>>}.
-
-merge_columns(Columns) ->
-    Names =
-        sets:to_list(
-            sets:union(
-                lists:map(fun(C) ->
-                             sets:from_list(
-                                 maps:keys(C))
-                          end,
-                          Columns))),
-    EmptyColumns =
-        maps:from_list(
-            lists:map(fun(Name) -> {Name, empty_column()} end, Names)),
-    lists:foldl(fun merge_columns/2, EmptyColumns, Columns).
-
-%% collect columns from points
-collect_columns(Points) ->
-    collect_columns(Points, []).
-
-collect_columns([], Columns) ->
-    maps:values(merge_columns(Columns));
-collect_columns([Point | T], Columns) ->
-    collect_columns(T, [convert_columns(Point) | Columns]).
-
-ts_column(Ts) when is_map(Ts) ->
-    maps:merge(#{column_name => ?TS_COLUMN, semantic_type => 'TIMESTAMP'}, Ts);
-ts_column(Ts) ->
-    #{column_name => ?TS_COLUMN,
-      semantic_type => 'TIMESTAMP',
-      values => #{ts_millisecond_values => [Ts]},
-      datatype => 'TIMESTAMP_MILLISECOND'}.
-
-field_column(Name, V) when is_map(V) ->
-    maps:merge(#{column_name => Name, semantic_type => 'FIELD'}, V);
-field_column(Name, V) ->
-    #{column_name => Name,
-      semantic_type => 'FIELD',
-      values => #{f64_values => [V]},
-      datatype => 'FLOAT64'}.
-
-tag_column(Name, V) when is_map(V) ->
-    maps:merge(#{column_name => Name, semantic_type => 'TAG'}, V);
-tag_column(Name, V) ->
-    #{column_name => Name,
-      semantic_type => 'TAG',
-      values => #{string_values => [V]},
-      datatype => 'STRING'}.
+rpc_call(#{pool := Pool} = _Client, Request) ->
+    Fun = fun(Worker) -> greptimedb_worker:rpc_call(Worker, Request) end,
+    try
+        ecpool:with_client(Pool, Fun)
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] grpc write fail: ~0p ~0p ~0p", [E, R, S]),
+            {error, {E, R}}
+    end.

@@ -2,6 +2,10 @@
 [{<<"acceptor_pool">>,{pkg,<<"acceptor_pool">>,<<"1.0.0">>},1},
  {<<"chatterbox">>,{pkg,<<"ts_chatterbox">>,<<"0.13.0">>},1},
  {<<"ctx">>,{pkg,<<"ctx">>,<<"0.6.0">>},1},
+ {<<"ecpool">>,
+  {git,"https://github.com/emqx/ecpool",
+       {ref,"d01b8cb99af90bc177eeeabe29075133db878fb3"}},
+  0},
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.8.0">>},1},
  {<<"grpcbox">>,{pkg,<<"grpcbox">>,<<"0.16.0">>},0},
  {<<"hpack">>,{pkg,<<"hpack_erl">>,<<"0.2.3">>},2}]}.
