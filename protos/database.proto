@@ -8,7 +8,6 @@ option go_package = "github.com/GreptimeTeam/greptime-proto/go/greptime/v1";
 
 import "protos/ddl.proto";
 import "protos/column.proto";
-import "protos/prom.proto";
 import "protos/common.proto";
 
 service GreptimeDatabase {
@@ -37,7 +36,6 @@ message QueryRequest {
   oneof query {
     string sql = 1;
     bytes logical_plan = 2;
-    PromRangeQuery prom_range_query = 3;
   }
 }
 
