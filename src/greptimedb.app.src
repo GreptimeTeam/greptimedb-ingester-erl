@@ -2,9 +2,10 @@
  greptimedb,
  [{description, "A client library for GreptimeDB"},
   {vsn, "0.1.0"},
-  {registered, []},
-  {applications, [kernel, stdlib]},
+  {registered, [greptimedb_sup]},
+  {applications, [kernel, stdlib, grpcbox, ecpool]},
   {env, []},
   {modules, []},
   {licenses, ["Apache-2.0"]},
-  {links, []}]}.
+  {links, []},
+  {mod,{influxdb_app,[]}}]}.
