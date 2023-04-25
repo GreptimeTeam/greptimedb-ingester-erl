@@ -24,7 +24,7 @@
 %% gen_server callbacks
 %% ===================================================================
 init(Args) ->
-    error_logger:info_msg("greptimedb genserver has started (~w)~n", [self()]),
+    logger:debug("[GreptimeDB] genserver has started (~w)~n", [self()]),
     Endpoints = proplists:get_value(endpoints, Args),
     Options = proplists:get_value(gprc_options, Args, #{}),
     Channels =
@@ -65,6 +65,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(Reason, #state{channel = Channel} = State) ->
+    logger:debug("[GreptimeDB] genserver has stopped (~w)~n", [self()]),
     grpcbox_channel:stop(Channel),
     {stop, Reason, State}.
 

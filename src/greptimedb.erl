@@ -1,7 +1,8 @@
 -module(greptimedb).
 
--export([start_client/1, send/3, ddl/1]).
+-export([start_client/1, stop_client/1, send/3, ddl/1]).
 
+-spec(start_client(list()) -> {ok, Client :: map()} | {error, {already_started, Client :: map()}} | {error, Reason :: term()}).
 start_client(Options0) ->
     Pool = proplists:get_value(pool, Options0),
     Options = lists:keydelete(protocol, 1, lists:keydelete(pool, 1, Options0)),
@@ -41,3 +42,10 @@ send0(#{pool := Pool} = _Client, Metric, Points) ->
 
 ddl(_Client) ->
     ok.
+
+-spec(stop_client(Client :: map()) -> ok | term()).
+stop_client(#{pool := Pool, protocol := Protocol}) ->
+    case Protocol of
+        http ->
+            ecpool:stop_sup_pool(Pool)
+    end.
