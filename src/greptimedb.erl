@@ -3,9 +3,6 @@
 -export([start_client/1, send/3, ddl/1]).
 
 start_client(Options0) ->
-    {ok, _} = application:ensure_all_started(grpcbox),
-    {ok, _} = application:ensure_all_started(ecpool),
-
     Pool = proplists:get_value(pool, Options0),
     Options = lists:keydelete(protocol, 1, lists:keydelete(pool, 1, Options0)),
 

@@ -1,4 +1,4 @@
--module(greptime_sup).
+-module(greptimedb_sup).
 
 -behaviour(supervisor).
 
