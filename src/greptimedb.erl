@@ -1,8 +1,11 @@
 -module(greptimedb).
 
--export([start_client/1, stop_client/1, send/3, ddl/1]).
+-export([start_client/1, stop_client/1, write/3, ddl/1]).
 
--spec(start_client(list()) -> {ok, Client :: map()} | {error, {already_started, Client :: map()}} | {error, Reason :: term()}).
+-spec start_client(list()) ->
+                      {ok, Client :: map()} |
+                      {error, {already_started, Client :: map()}} |
+                      {error, Reason :: term()}.
 start_client(Options0) ->
     Pool = proplists:get_value(pool, Options0),
     Options = lists:keydelete(protocol, 1, lists:keydelete(pool, 1, Options0)),
@@ -17,11 +20,12 @@ start_client(Options0) ->
             {error, Reason}
     end.
 
-send(#{protocol := Protocol} = Client, Metric, Points) ->
+write(#{protocol := Protocol} = Client, Metric, Points) ->
     try
         case Protocol of
             http ->
-                send0(Client, Metric, Points)
+                Request = greptimedb_encoder:insert_request(Metric, Points),
+                rpc_call(Client, Request)
         end
     catch
         E:R:S ->
@@ -30,8 +34,8 @@ send(#{protocol := Protocol} = Client, Metric, Points) ->
             {error, R}
     end.
 
-send0(#{pool := Pool} = _Client, Metric, Points) ->
-    Fun = fun(Worker) -> greptimedb_worker:send(Worker, Metric, Points) end,
+rpc_call(#{pool := Pool} = _Client, Request) ->
+    Fun = fun(Worker) -> greptimedb_worker:rpc_call(Worker, Request) end,
     try
         ecpool:with_client(Pool, Fun)
     catch
@@ -43,7 +47,7 @@ send0(#{pool := Pool} = _Client, Metric, Points) ->
 ddl(_Client) ->
     ok.
 
--spec(stop_client(Client :: map()) -> ok | term()).
+-spec stop_client(Client :: map()) -> ok | term().
 stop_client(#{pool := Pool, protocol := Protocol}) ->
     case Protocol of
         http ->

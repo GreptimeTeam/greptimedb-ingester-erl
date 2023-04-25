@@ -32,7 +32,8 @@ t_collect_columns(_) ->
                  <<"region">> => <<"ningbo">>,
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],
-    Columns = greptimedb_worker:collect_columns(Points),
+    Metric = "Test",
+    Columns = greptimedb_encoder:insert_request(Metric, Points),
     ct:print("~w~n", [Columns]),
     ok.
 
@@ -61,5 +62,5 @@ t_send(_) ->
 
     {ok, Client} = greptimedb:start_client(Options),
     {ok, #{response := {affected_rows, #{value := 2}}}} =
-        greptimedb:send(Client, Metric, Points),
+        greptimedb:write(Client, Metric, Points),
     ok.
