@@ -5,8 +5,8 @@ greptimedb-client-erl
 
 A client library for GreptimeDB
 
-Usage
------
+## Usage
+
 Start the application:
 
 ```erlang
@@ -33,13 +33,14 @@ Write data by rows:
            tags =>
                #{<<"from">> => <<"mqttx_4b963a8e">>,
                  <<"host">> => <<"serverA">>,
-                 <<"qos">> => #{values => #{i64_values => [0]}, datatype => 'INT64'},
+                 <<"qos">> => greptimedb_values:int64_value(0),
                  <<"region">> => <<"hangzhou">>},
            timestamp => 1619775142098},
          #{fields => #{<<"temperature">> => 2},
            tags =>
                #{<<"from">> => <<"mqttx_4b963a8e">>,
                  <<"host">> => <<"serverB">>,
+                 <<"qos">> => greptimedb_values:int64_value(1),
                  <<"region">> => <<"ningbo">>,
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],
@@ -54,12 +55,33 @@ Stop the client:
     greptimedb:stop_client(Client).
 ```
 
-Build
------
+## APIs guide
+
+### Client options
+
+A proper list contains:
+
+* `endpoints`: GreptimeDB server address in the form of `{http, host, port}`
+* `pool`, `pool_size` etc.: the client pool settings
+* `gprc_options`: grpxbox [client options](https://github.com/tsloughter/grpcbox#defining-channels)
+
+### Write and datatypes
+
+Write each row by `greptimedb:write/3` function. Every row contains:
+
+* `fields`: the metric fields, the default type is `FLOAT64`.
+* `tags`: the metric tags, the default type is `STRING`.
+* `timestamp`: the metric timestamp, the default type is `TIMESTAMP_MILLISECOND`.
+
+Of course, you can write other types by using functions in [greptimedb_values](https://github.com/GreptimeTeam/greptimedb-client-erl/blob/main/src/greptimedb_values.erl).
+
+
+## Build and test
+
+Build:
 
     $ rebar3 compile
 
-Test
------
+Test:
 
     $ rebar3 do ct,eunit

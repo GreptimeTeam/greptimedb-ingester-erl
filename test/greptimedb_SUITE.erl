@@ -44,13 +44,14 @@ t_send(_) ->
            tags =>
                #{<<"from">> => <<"mqttx_4b963a8e">>,
                  <<"host">> => <<"serverA">>,
-                 <<"qos">> => #{values => #{i64_values => [0]}, datatype => 'INT64'},
+                 <<"qos">> => greptimedb_values:int64_value(0),
                  <<"region">> => <<"hangzhou">>},
            timestamp => 1619775142098},
          #{fields => #{<<"temperature">> => 2},
            tags =>
                #{<<"from">> => <<"mqttx_4b963a8e">>,
                  <<"host">> => <<"serverB">>,
+                 <<"qos">> => greptimedb_values:int64_value(1),
                  <<"region">> => <<"ningbo">>,
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],

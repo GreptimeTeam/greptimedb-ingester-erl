@@ -46,104 +46,80 @@
 -export([gpb_version_as_string/0, gpb_version_as_list/0]).
 -export([gpb_version_source/0]).
 
+
 %% enumerated types
 
 -export_type([]).
 
 %% message types
--type response_header() :: #{}.
+-type response_header() ::
+      #{
+       }.
+
 -type request_header() ::
-    #{catalog => unicode:chardata(),
-      schema => unicode:chardata(),
-      authorization => auth_header(),
-      dbname => unicode:chardata()}.
+      #{catalog                 => unicode:chardata(), % = 1, optional
+        schema                  => unicode:chardata(), % = 2, optional
+        authorization           => auth_header(),   % = 3, optional
+        dbname                  => unicode:chardata() % = 4, optional
+       }.
 
-                                     % = 1, optional
+-type auth_header() ::
+      #{auth_scheme             => {basic, basic()} | {token, token()} % oneof
+       }.
 
-                                                       % = 2, optional
-   % = 3, optional
-
-                                                      % = 4, optional
-
--type auth_header() :: #{auth_scheme => {basic, basic()} | {token, token()}}. % oneof
 -type basic() ::
-    #{username => unicode:chardata(), password => unicode:chardata()}. % = 1, optional
+      #{username                => unicode:chardata(), % = 1, optional
+        password                => unicode:chardata() % = 2, optional
+       }.
 
-                                                      % = 2, optional
+-type token() ::
+      #{token                   => unicode:chardata() % = 1, optional
+       }.
 
--type token() :: #{token => unicode:chardata()}. % = 1, optional
--type affected_rows() :: #{value => non_neg_integer()}. % = 1, optional, 32 bits
--type flight_metadata() :: #{affected_rows => affected_rows()}.  % = 1, optional
+-type affected_rows() ::
+      #{value                   => non_neg_integer() % = 1, optional, 32 bits
+       }.
 
--export_type([response_header/0, request_header/0, auth_header/0, basic/0, token/0,
-              affected_rows/0, flight_metadata/0]).
+-type flight_metadata() ::
+      #{affected_rows           => affected_rows()  % = 1, optional
+       }.
 
--type '$msg_name'() ::
-    response_header |
-    request_header |
-    auth_header |
-    basic |
-    token |
-    affected_rows |
-    flight_metadata.
--type '$msg'() ::
-    response_header() |
-    request_header() |
-    auth_header() |
-    basic() |
-    token() |
-    affected_rows() |
-    flight_metadata().
-
+-export_type(['response_header'/0, 'request_header'/0, 'auth_header'/0, 'basic'/0, 'token'/0, 'affected_rows'/0, 'flight_metadata'/0]).
+-type '$msg_name'() :: response_header | request_header | auth_header | basic | token | affected_rows | flight_metadata.
+-type '$msg'() :: response_header() | request_header() | auth_header() | basic() | token() | affected_rows() | flight_metadata().
 -export_type(['$msg_name'/0, '$msg'/0]).
 
 -if(?OTP_RELEASE >= 24).
-
 -dialyzer({no_underspecs, encode_msg/2}).
-
 -endif.
-
 -spec encode_msg('$msg'(), '$msg_name'()) -> binary().
-encode_msg(Msg, MsgName) when is_atom(MsgName) ->
-    encode_msg(Msg, MsgName, []).
+encode_msg(Msg, MsgName) when is_atom(MsgName) -> encode_msg(Msg, MsgName, []).
 
 -if(?OTP_RELEASE >= 24).
-
 -dialyzer({no_underspecs, encode_msg/3}).
-
 -endif.
-
 -spec encode_msg('$msg'(), '$msg_name'(), list()) -> binary().
 encode_msg(Msg, MsgName, Opts) ->
     case proplists:get_bool(verify, Opts) of
-        true ->
-            verify_msg(Msg, MsgName, Opts);
-        false ->
-            ok
+        true -> verify_msg(Msg, MsgName, Opts);
+        false -> ok
     end,
     TrUserData = proplists:get_value(user_data, Opts),
     case MsgName of
-        response_header ->
-            encode_msg_response_header(id(Msg, TrUserData), TrUserData);
-        request_header ->
-            encode_msg_request_header(id(Msg, TrUserData), TrUserData);
-        auth_header ->
-            encode_msg_auth_header(id(Msg, TrUserData), TrUserData);
-        basic ->
-            encode_msg_basic(id(Msg, TrUserData), TrUserData);
-        token ->
-            encode_msg_token(id(Msg, TrUserData), TrUserData);
-        affected_rows ->
-            encode_msg_affected_rows(id(Msg, TrUserData), TrUserData);
-        flight_metadata ->
-            encode_msg_flight_metadata(id(Msg, TrUserData), TrUserData)
+        response_header -> encode_msg_response_header(id(Msg, TrUserData), TrUserData);
+        request_header -> encode_msg_request_header(id(Msg, TrUserData), TrUserData);
+        auth_header -> encode_msg_auth_header(id(Msg, TrUserData), TrUserData);
+        basic -> encode_msg_basic(id(Msg, TrUserData), TrUserData);
+        token -> encode_msg_token(id(Msg, TrUserData), TrUserData);
+        affected_rows -> encode_msg_affected_rows(id(Msg, TrUserData), TrUserData);
+        flight_metadata -> encode_msg_flight_metadata(id(Msg, TrUserData), TrUserData)
     end.
 
-encode_msg_response_header(_Msg, _TrUserData) ->
-    <<>>.
 
-encode_msg_request_header(Msg, TrUserData) ->
-    encode_msg_request_header(Msg, <<>>, TrUserData).
+encode_msg_response_header(_Msg, _TrUserData) -> <<>>.
+
+encode_msg_request_header(Msg, TrUserData) -> encode_msg_request_header(Msg, <<>>, TrUserData).
+
 
 encode_msg_request_header(#{} = M, Bin, TrUserData) ->
     B1 = case M of
@@ -151,83 +127,60 @@ encode_msg_request_header(#{} = M, Bin, TrUserData) ->
                  begin
                      TrF1 = id(F1, TrUserData),
                      case is_empty_string(TrF1) of
-                         true ->
-                             Bin;
-                         false ->
-                             e_type_string(TrF1, <<Bin/binary, 10>>, TrUserData)
+                         true -> Bin;
+                         false -> e_type_string(TrF1, <<Bin/binary, 10>>, TrUserData)
                      end
                  end;
-             _ ->
-                 Bin
+             _ -> Bin
          end,
     B2 = case M of
              #{schema := F2} ->
                  begin
                      TrF2 = id(F2, TrUserData),
                      case is_empty_string(TrF2) of
-                         true ->
-                             B1;
-                         false ->
-                             e_type_string(TrF2, <<B1/binary, 18>>, TrUserData)
+                         true -> B1;
+                         false -> e_type_string(TrF2, <<B1/binary, 18>>, TrUserData)
                      end
                  end;
-             _ ->
-                 B1
+             _ -> B1
          end,
     B3 = case M of
              #{authorization := F3} ->
                  begin
                      TrF3 = id(F3, TrUserData),
-                     if TrF3 =:= undefined ->
-                            B2;
-                        true ->
-                            e_mfield_request_header_authorization(TrF3,
-                                                                  <<B2/binary, 26>>,
-                                                                  TrUserData)
+                     if TrF3 =:= undefined -> B2;
+                        true -> e_mfield_request_header_authorization(TrF3, <<B2/binary, 26>>, TrUserData)
                      end
                  end;
-             _ ->
-                 B2
+             _ -> B2
          end,
     case M of
         #{dbname := F4} ->
             begin
                 TrF4 = id(F4, TrUserData),
                 case is_empty_string(TrF4) of
-                    true ->
-                        B3;
-                    false ->
-                        e_type_string(TrF4, <<B3/binary, 34>>, TrUserData)
+                    true -> B3;
+                    false -> e_type_string(TrF4, <<B3/binary, 34>>, TrUserData)
                 end
             end;
-        _ ->
-            B3
+        _ -> B3
     end.
 
-encode_msg_auth_header(Msg, TrUserData) ->
-    encode_msg_auth_header(Msg, <<>>, TrUserData).
+encode_msg_auth_header(Msg, TrUserData) -> encode_msg_auth_header(Msg, <<>>, TrUserData).
+
 
 encode_msg_auth_header(#{} = M, Bin, TrUserData) ->
     case M of
         #{auth_scheme := F1} ->
             case id(F1, TrUserData) of
-                {basic, TF1} ->
-                    begin
-                        TrTF1 = id(TF1, TrUserData),
-                        e_mfield_auth_header_basic(TrTF1, <<Bin/binary, 10>>, TrUserData)
-                    end;
-                {token, TF1} ->
-                    begin
-                        TrTF1 = id(TF1, TrUserData),
-                        e_mfield_auth_header_token(TrTF1, <<Bin/binary, 18>>, TrUserData)
-                    end
+                {basic, TF1} -> begin TrTF1 = id(TF1, TrUserData), e_mfield_auth_header_basic(TrTF1, <<Bin/binary, 10>>, TrUserData) end;
+                {token, TF1} -> begin TrTF1 = id(TF1, TrUserData), e_mfield_auth_header_token(TrTF1, <<Bin/binary, 18>>, TrUserData) end
             end;
-        _ ->
-            Bin
+        _ -> Bin
     end.
 
-encode_msg_basic(Msg, TrUserData) ->
-    encode_msg_basic(Msg, <<>>, TrUserData).
+encode_msg_basic(Msg, TrUserData) -> encode_msg_basic(Msg, <<>>, TrUserData).
+
 
 encode_msg_basic(#{} = M, Bin, TrUserData) ->
     B1 = case M of
@@ -235,32 +188,26 @@ encode_msg_basic(#{} = M, Bin, TrUserData) ->
                  begin
                      TrF1 = id(F1, TrUserData),
                      case is_empty_string(TrF1) of
-                         true ->
-                             Bin;
-                         false ->
-                             e_type_string(TrF1, <<Bin/binary, 10>>, TrUserData)
+                         true -> Bin;
+                         false -> e_type_string(TrF1, <<Bin/binary, 10>>, TrUserData)
                      end
                  end;
-             _ ->
-                 Bin
+             _ -> Bin
          end,
     case M of
         #{password := F2} ->
             begin
                 TrF2 = id(F2, TrUserData),
                 case is_empty_string(TrF2) of
-                    true ->
-                        B1;
-                    false ->
-                        e_type_string(TrF2, <<B1/binary, 18>>, TrUserData)
+                    true -> B1;
+                    false -> e_type_string(TrF2, <<B1/binary, 18>>, TrUserData)
                 end
             end;
-        _ ->
-            B1
+        _ -> B1
     end.
 
-encode_msg_token(Msg, TrUserData) ->
-    encode_msg_token(Msg, <<>>, TrUserData).
+encode_msg_token(Msg, TrUserData) -> encode_msg_token(Msg, <<>>, TrUserData).
+
 
 encode_msg_token(#{} = M, Bin, TrUserData) ->
     case M of
@@ -268,50 +215,41 @@ encode_msg_token(#{} = M, Bin, TrUserData) ->
             begin
                 TrF1 = id(F1, TrUserData),
                 case is_empty_string(TrF1) of
-                    true ->
-                        Bin;
-                    false ->
-                        e_type_string(TrF1, <<Bin/binary, 10>>, TrUserData)
+                    true -> Bin;
+                    false -> e_type_string(TrF1, <<Bin/binary, 10>>, TrUserData)
                 end
             end;
-        _ ->
-            Bin
+        _ -> Bin
     end.
 
-encode_msg_affected_rows(Msg, TrUserData) ->
-    encode_msg_affected_rows(Msg, <<>>, TrUserData).
+encode_msg_affected_rows(Msg, TrUserData) -> encode_msg_affected_rows(Msg, <<>>, TrUserData).
+
 
 encode_msg_affected_rows(#{} = M, Bin, TrUserData) ->
     case M of
         #{value := F1} ->
             begin
                 TrF1 = id(F1, TrUserData),
-                if TrF1 =:= 0 ->
-                       Bin;
-                   true ->
-                       e_varint(TrF1, <<Bin/binary, 8>>, TrUserData)
+                if TrF1 =:= 0 -> Bin;
+                   true -> e_varint(TrF1, <<Bin/binary, 8>>, TrUserData)
                 end
             end;
-        _ ->
-            Bin
+        _ -> Bin
     end.
 
-encode_msg_flight_metadata(Msg, TrUserData) ->
-    encode_msg_flight_metadata(Msg, <<>>, TrUserData).
+encode_msg_flight_metadata(Msg, TrUserData) -> encode_msg_flight_metadata(Msg, <<>>, TrUserData).
+
 
 encode_msg_flight_metadata(#{} = M, Bin, TrUserData) ->
     case M of
         #{affected_rows := F1} ->
             begin
                 TrF1 = id(F1, TrUserData),
-                if TrF1 =:= undefined ->
-                       Bin;
-                   true ->
-                       e_mfield_flight_metadata_affected_rows(TrF1, <<Bin/binary, 10>>, TrUserData)
+                if TrF1 =:= undefined -> Bin;
+                   true -> e_mfield_flight_metadata_affected_rows(TrF1, <<Bin/binary, 10>>, TrUserData)
                 end
             end;
-        _ ->
-            Bin
+        _ -> Bin
     end.
 
 e_mfield_request_header_authorization(Msg, Bin, TrUserData) ->
@@ -334,49 +272,35 @@ e_mfield_flight_metadata_affected_rows(Msg, Bin, TrUserData) ->
     Bin2 = e_varint(byte_size(SubBin), Bin),
     <<Bin2/binary, SubBin/binary>>.
 
--compile({nowarn_unused_function, e_type_sint/3}).
+-compile({nowarn_unused_function,e_type_sint/3}).
+e_type_sint(Value, Bin, _TrUserData) when Value >= 0 -> e_varint(Value * 2, Bin);
+e_type_sint(Value, Bin, _TrUserData) -> e_varint(Value * -2 - 1, Bin).
 
-e_type_sint(Value, Bin, _TrUserData) when Value >= 0 ->
-    e_varint(Value * 2, Bin);
-e_type_sint(Value, Bin, _TrUserData) ->
-    e_varint(Value * -2 - 1, Bin).
-
--compile({nowarn_unused_function, e_type_int32/3}).
-
-e_type_int32(Value, Bin, _TrUserData) when 0 =< Value, Value =< 127 ->
-    <<Bin/binary, Value>>;
+-compile({nowarn_unused_function,e_type_int32/3}).
+e_type_int32(Value, Bin, _TrUserData) when 0 =< Value, Value =< 127 -> <<Bin/binary, Value>>;
 e_type_int32(Value, Bin, _TrUserData) ->
     <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
     e_varint(N, Bin).
 
--compile({nowarn_unused_function, e_type_int64/3}).
-
-e_type_int64(Value, Bin, _TrUserData) when 0 =< Value, Value =< 127 ->
-    <<Bin/binary, Value>>;
+-compile({nowarn_unused_function,e_type_int64/3}).
+e_type_int64(Value, Bin, _TrUserData) when 0 =< Value, Value =< 127 -> <<Bin/binary, Value>>;
 e_type_int64(Value, Bin, _TrUserData) ->
     <<N:64/unsigned-native>> = <<Value:64/signed-native>>,
     e_varint(N, Bin).
 
--compile({nowarn_unused_function, e_type_bool/3}).
+-compile({nowarn_unused_function,e_type_bool/3}).
+e_type_bool(true, Bin, _TrUserData) -> <<Bin/binary, 1>>;
+e_type_bool(false, Bin, _TrUserData) -> <<Bin/binary, 0>>;
+e_type_bool(1, Bin, _TrUserData) -> <<Bin/binary, 1>>;
+e_type_bool(0, Bin, _TrUserData) -> <<Bin/binary, 0>>.
 
-e_type_bool(true, Bin, _TrUserData) ->
-    <<Bin/binary, 1>>;
-e_type_bool(false, Bin, _TrUserData) ->
-    <<Bin/binary, 0>>;
-e_type_bool(1, Bin, _TrUserData) ->
-    <<Bin/binary, 1>>;
-e_type_bool(0, Bin, _TrUserData) ->
-    <<Bin/binary, 0>>.
-
--compile({nowarn_unused_function, e_type_string/3}).
-
+-compile({nowarn_unused_function,e_type_string/3}).
 e_type_string(S, Bin, _TrUserData) ->
     Utf8 = unicode:characters_to_binary(S),
     Bin2 = e_varint(byte_size(Utf8), Bin),
     <<Bin2/binary, Utf8/binary>>.
 
--compile({nowarn_unused_function, e_type_bytes/3}).
-
+-compile({nowarn_unused_function,e_type_bytes/3}).
 e_type_bytes(Bytes, Bin, _TrUserData) when is_binary(Bytes) ->
     Bin2 = e_varint(byte_size(Bytes), Bin),
     <<Bin2/binary, Bytes/binary>>;
@@ -385,200 +309,138 @@ e_type_bytes(Bytes, Bin, _TrUserData) when is_list(Bytes) ->
     Bin2 = e_varint(byte_size(BytesBin), Bin),
     <<Bin2/binary, BytesBin/binary>>.
 
--compile({nowarn_unused_function, e_type_fixed32/3}).
+-compile({nowarn_unused_function,e_type_fixed32/3}).
+e_type_fixed32(Value, Bin, _TrUserData) -> <<Bin/binary, Value:32/little>>.
 
-e_type_fixed32(Value, Bin, _TrUserData) ->
-    <<Bin/binary, Value:32/little>>.
+-compile({nowarn_unused_function,e_type_sfixed32/3}).
+e_type_sfixed32(Value, Bin, _TrUserData) -> <<Bin/binary, Value:32/little-signed>>.
 
--compile({nowarn_unused_function, e_type_sfixed32/3}).
+-compile({nowarn_unused_function,e_type_fixed64/3}).
+e_type_fixed64(Value, Bin, _TrUserData) -> <<Bin/binary, Value:64/little>>.
 
-e_type_sfixed32(Value, Bin, _TrUserData) ->
-    <<Bin/binary, Value:32/little-signed>>.
+-compile({nowarn_unused_function,e_type_sfixed64/3}).
+e_type_sfixed64(Value, Bin, _TrUserData) -> <<Bin/binary, Value:64/little-signed>>.
 
--compile({nowarn_unused_function, e_type_fixed64/3}).
+-compile({nowarn_unused_function,e_type_float/3}).
+e_type_float(V, Bin, _) when is_number(V) -> <<Bin/binary, V:32/little-float>>;
+e_type_float(infinity, Bin, _) -> <<Bin/binary, 0:16, 128, 127>>;
+e_type_float('-infinity', Bin, _) -> <<Bin/binary, 0:16, 128, 255>>;
+e_type_float(nan, Bin, _) -> <<Bin/binary, 0:16, 192, 127>>.
 
-e_type_fixed64(Value, Bin, _TrUserData) ->
-    <<Bin/binary, Value:64/little>>.
+-compile({nowarn_unused_function,e_type_double/3}).
+e_type_double(V, Bin, _) when is_number(V) -> <<Bin/binary, V:64/little-float>>;
+e_type_double(infinity, Bin, _) -> <<Bin/binary, 0:48, 240, 127>>;
+e_type_double('-infinity', Bin, _) -> <<Bin/binary, 0:48, 240, 255>>;
+e_type_double(nan, Bin, _) -> <<Bin/binary, 0:48, 248, 127>>.
 
--compile({nowarn_unused_function, e_type_sfixed64/3}).
-
-e_type_sfixed64(Value, Bin, _TrUserData) ->
-    <<Bin/binary, Value:64/little-signed>>.
-
--compile({nowarn_unused_function, e_type_float/3}).
-
-e_type_float(V, Bin, _) when is_number(V) ->
-    <<Bin/binary, V:32/little-float>>;
-e_type_float(infinity, Bin, _) ->
-    <<Bin/binary, 0:16, 128, 127>>;
-e_type_float('-infinity', Bin, _) ->
-    <<Bin/binary, 0:16, 128, 255>>;
-e_type_float(nan, Bin, _) ->
-    <<Bin/binary, 0:16, 192, 127>>.
-
--compile({nowarn_unused_function, e_type_double/3}).
-
-e_type_double(V, Bin, _) when is_number(V) ->
-    <<Bin/binary, V:64/little-float>>;
-e_type_double(infinity, Bin, _) ->
-    <<Bin/binary, 0:48, 240, 127>>;
-e_type_double('-infinity', Bin, _) ->
-    <<Bin/binary, 0:48, 240, 255>>;
-e_type_double(nan, Bin, _) ->
-    <<Bin/binary, 0:48, 248, 127>>.
-
--compile({nowarn_unused_function, e_unknown_elems/2}).
-
+-compile({nowarn_unused_function,e_unknown_elems/2}).
 e_unknown_elems([Elem | Rest], Bin) ->
-    BinR =
-        case Elem of
-            {varint, FNum, N} ->
-                BinF = e_varint(FNum bsl 3, Bin),
-                e_varint(N, BinF);
-            {length_delimited, FNum, Data} ->
-                BinF = e_varint(FNum bsl 3 bor 2, Bin),
-                BinL = e_varint(byte_size(Data), BinF),
-                <<BinL/binary, Data/binary>>;
-            {group, FNum, GroupFields} ->
-                Bin1 = e_varint(FNum bsl 3 bor 3, Bin),
-                Bin2 = e_unknown_elems(GroupFields, Bin1),
-                e_varint(FNum bsl 3 bor 4, Bin2);
-            {fixed32, FNum, V} ->
-                BinF = e_varint(FNum bsl 3 bor 5, Bin),
-                <<BinF/binary, V:32/little>>;
-            {fixed64, FNum, V} ->
-                BinF = e_varint(FNum bsl 3 bor 1, Bin),
-                <<BinF/binary, V:64/little>>
-        end,
+    BinR = case Elem of
+               {varint, FNum, N} ->
+                   BinF = e_varint(FNum bsl 3, Bin),
+                   e_varint(N, BinF);
+               {length_delimited, FNum, Data} ->
+                   BinF = e_varint(FNum bsl 3 bor 2, Bin),
+                   BinL = e_varint(byte_size(Data), BinF),
+                   <<BinL/binary, Data/binary>>;
+               {group, FNum, GroupFields} ->
+                   Bin1 = e_varint(FNum bsl 3 bor 3, Bin),
+                   Bin2 = e_unknown_elems(GroupFields, Bin1),
+                   e_varint(FNum bsl 3 bor 4, Bin2);
+               {fixed32, FNum, V} ->
+                   BinF = e_varint(FNum bsl 3 bor 5, Bin),
+                   <<BinF/binary, V:32/little>>;
+               {fixed64, FNum, V} ->
+                   BinF = e_varint(FNum bsl 3 bor 1, Bin),
+                   <<BinF/binary, V:64/little>>
+           end,
     e_unknown_elems(Rest, BinR);
-e_unknown_elems([], Bin) ->
-    Bin.
+e_unknown_elems([], Bin) -> Bin.
 
--compile({nowarn_unused_function, e_varint/3}).
+-compile({nowarn_unused_function,e_varint/3}).
+e_varint(N, Bin, _TrUserData) -> e_varint(N, Bin).
 
-e_varint(N, Bin, _TrUserData) ->
-    e_varint(N, Bin).
-
--compile({nowarn_unused_function, e_varint/2}).
-
-e_varint(N, Bin) when N =< 127 ->
-    <<Bin/binary, N>>;
+-compile({nowarn_unused_function,e_varint/2}).
+e_varint(N, Bin) when N =< 127 -> <<Bin/binary, N>>;
 e_varint(N, Bin) ->
     Bin2 = <<Bin/binary, (N band 127 bor 128)>>,
     e_varint(N bsr 7, Bin2).
 
-is_empty_string("") ->
-    true;
-is_empty_string(<<>>) ->
-    true;
-is_empty_string(L) when is_list(L) ->
-    not string_has_chars(L);
-is_empty_string(B) when is_binary(B) ->
-    false.
+is_empty_string("") -> true;
+is_empty_string(<<>>) -> true;
+is_empty_string(L) when is_list(L) -> not string_has_chars(L);
+is_empty_string(B) when is_binary(B) -> false.
 
-string_has_chars([C | _]) when is_integer(C) ->
-    true;
+string_has_chars([C | _]) when is_integer(C) -> true;
 string_has_chars([H | T]) ->
     case string_has_chars(H) of
-        true ->
-            true;
-        false ->
-            string_has_chars(T)
+        true -> true;
+        false -> string_has_chars(T)
     end;
-string_has_chars(B) when is_binary(B), byte_size(B) =/= 0 ->
-    true;
-string_has_chars(C) when is_integer(C) ->
-    true;
-string_has_chars(<<>>) ->
-    false;
-string_has_chars([]) ->
-    false.
+string_has_chars(B) when is_binary(B), byte_size(B) =/= 0 -> true;
+string_has_chars(C) when is_integer(C) -> true;
+string_has_chars(<<>>) -> false;
+string_has_chars([]) -> false.
 
-decode_msg(Bin, MsgName) when is_binary(Bin) ->
-    decode_msg(Bin, MsgName, []).
+
+decode_msg(Bin, MsgName) when is_binary(Bin) -> decode_msg(Bin, MsgName, []).
 
 decode_msg(Bin, MsgName, Opts) when is_binary(Bin) ->
     TrUserData = proplists:get_value(user_data, Opts),
     decode_msg_1_catch(Bin, MsgName, TrUserData).
 
 -ifdef('OTP_RELEASE').
-
 decode_msg_1_catch(Bin, MsgName, TrUserData) ->
-    try
-        decode_msg_2_doit(MsgName, Bin, TrUserData)
+    try decode_msg_2_doit(MsgName, Bin, TrUserData)
     catch
-        error:({gpb_error, _} = Reason):StackTrace ->
+        error:{gpb_error,_}=Reason:StackTrace ->
             erlang:raise(error, Reason, StackTrace);
-        Class:Reason:StackTrace ->
-            error({gpb_error, {decoding_failure, {Bin, MsgName, {Class, Reason, StackTrace}}}})
+        Class:Reason:StackTrace -> error({gpb_error,{decoding_failure, {Bin, MsgName, {Class, Reason, StackTrace}}}})
     end.
-
-- else .
-
+-else.
 decode_msg_1_catch(Bin, MsgName, TrUserData) ->
-    try
-        decode_msg_2_doit(MsgName, Bin, TrUserData)
+    try decode_msg_2_doit(MsgName, Bin, TrUserData)
     catch
-        error:({gpb_error, _} = Reason) ->
-            erlang:raise(error, Reason, erlang:get_stacktrace());
+        error:{gpb_error,_}=Reason ->
+            erlang:raise(error, Reason,
+                         erlang:get_stacktrace());
         Class:Reason ->
             StackTrace = erlang:get_stacktrace(),
-            error({gpb_error, {decoding_failure, {Bin, MsgName, {Class, Reason, StackTrace}}}})
+            error({gpb_error,{decoding_failure, {Bin, MsgName, {Class, Reason, StackTrace}}}})
     end.
-
 -endif.
 
-decode_msg_2_doit(response_header, Bin, TrUserData) ->
-    id(decode_msg_response_header(Bin, TrUserData), TrUserData);
-decode_msg_2_doit(request_header, Bin, TrUserData) ->
-    id(decode_msg_request_header(Bin, TrUserData), TrUserData);
-decode_msg_2_doit(auth_header, Bin, TrUserData) ->
-    id(decode_msg_auth_header(Bin, TrUserData), TrUserData);
-decode_msg_2_doit(basic, Bin, TrUserData) ->
-    id(decode_msg_basic(Bin, TrUserData), TrUserData);
-decode_msg_2_doit(token, Bin, TrUserData) ->
-    id(decode_msg_token(Bin, TrUserData), TrUserData);
-decode_msg_2_doit(affected_rows, Bin, TrUserData) ->
-    id(decode_msg_affected_rows(Bin, TrUserData), TrUserData);
-decode_msg_2_doit(flight_metadata, Bin, TrUserData) ->
-    id(decode_msg_flight_metadata(Bin, TrUserData), TrUserData).
+decode_msg_2_doit(response_header, Bin, TrUserData) -> id(decode_msg_response_header(Bin, TrUserData), TrUserData);
+decode_msg_2_doit(request_header, Bin, TrUserData) -> id(decode_msg_request_header(Bin, TrUserData), TrUserData);
+decode_msg_2_doit(auth_header, Bin, TrUserData) -> id(decode_msg_auth_header(Bin, TrUserData), TrUserData);
+decode_msg_2_doit(basic, Bin, TrUserData) -> id(decode_msg_basic(Bin, TrUserData), TrUserData);
+decode_msg_2_doit(token, Bin, TrUserData) -> id(decode_msg_token(Bin, TrUserData), TrUserData);
+decode_msg_2_doit(affected_rows, Bin, TrUserData) -> id(decode_msg_affected_rows(Bin, TrUserData), TrUserData);
+decode_msg_2_doit(flight_metadata, Bin, TrUserData) -> id(decode_msg_flight_metadata(Bin, TrUserData), TrUserData).
 
-decode_msg_response_header(Bin, TrUserData) ->
-    dfp_read_field_def_response_header(Bin, 0, 0, 0, TrUserData).
 
-dfp_read_field_def_response_header(<<>>, 0, 0, _, _) ->
-    #{};
-dfp_read_field_def_response_header(Other, Z1, Z2, F, TrUserData) ->
-    dg_read_field_def_response_header(Other, Z1, Z2, F, TrUserData).
 
-dg_read_field_def_response_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_response_header(Rest, N + 7, X bsl N + Acc, F, TrUserData);
+decode_msg_response_header(Bin, TrUserData) -> dfp_read_field_def_response_header(Bin, 0, 0, 0, TrUserData).
+
+dfp_read_field_def_response_header(<<>>, 0, 0, _, _) -> #{};
+dfp_read_field_def_response_header(Other, Z1, Z2, F, TrUserData) -> dg_read_field_def_response_header(Other, Z1, Z2, F, TrUserData).
+
+dg_read_field_def_response_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, TrUserData) when N < 32 - 7 -> dg_read_field_def_response_header(Rest, N + 7, X bsl N + Acc, F, TrUserData);
 dg_read_field_def_response_header(<<0:1, X:7, Rest/binary>>, N, Acc, _, TrUserData) ->
     Key = X bsl N + Acc,
     case Key band 7 of
-        0 ->
-            skip_varint_response_header(Rest, 0, 0, Key bsr 3, TrUserData);
-        1 ->
-            skip_64_response_header(Rest, 0, 0, Key bsr 3, TrUserData);
-        2 ->
-            skip_length_delimited_response_header(Rest, 0, 0, Key bsr 3, TrUserData);
-        3 ->
-            skip_group_response_header(Rest, 0, 0, Key bsr 3, TrUserData);
-        5 ->
-            skip_32_response_header(Rest, 0, 0, Key bsr 3, TrUserData)
+        0 -> skip_varint_response_header(Rest, 0, 0, Key bsr 3, TrUserData);
+        1 -> skip_64_response_header(Rest, 0, 0, Key bsr 3, TrUserData);
+        2 -> skip_length_delimited_response_header(Rest, 0, 0, Key bsr 3, TrUserData);
+        3 -> skip_group_response_header(Rest, 0, 0, Key bsr 3, TrUserData);
+        5 -> skip_32_response_header(Rest, 0, 0, Key bsr 3, TrUserData)
     end;
-dg_read_field_def_response_header(<<>>, 0, 0, _, _) ->
-    #{}.
+dg_read_field_def_response_header(<<>>, 0, 0, _, _) -> #{}.
 
-skip_varint_response_header(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, TrUserData) ->
-    skip_varint_response_header(Rest, Z1, Z2, F, TrUserData);
-skip_varint_response_header(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, TrUserData) ->
-    dfp_read_field_def_response_header(Rest, Z1, Z2, F, TrUserData).
+skip_varint_response_header(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, TrUserData) -> skip_varint_response_header(Rest, Z1, Z2, F, TrUserData);
+skip_varint_response_header(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, TrUserData) -> dfp_read_field_def_response_header(Rest, Z1, Z2, F, TrUserData).
 
-skip_length_delimited_response_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, TrUserData)
-    when N < 57 ->
-    skip_length_delimited_response_header(Rest, N + 7, X bsl N + Acc, F, TrUserData);
+skip_length_delimited_response_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, TrUserData) when N < 57 -> skip_length_delimited_response_header(Rest, N + 7, X bsl N + Acc, F, TrUserData);
 skip_length_delimited_response_header(<<0:1, X:7, Rest/binary>>, N, Acc, F, TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
@@ -588,409 +450,81 @@ skip_group_response_header(Bin, _, Z2, FNum, TrUserData) ->
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_response_header(Rest, 0, Z2, FNum, TrUserData).
 
-skip_32_response_header(<<_:32, Rest/binary>>, Z1, Z2, F, TrUserData) ->
-    dfp_read_field_def_response_header(Rest, Z1, Z2, F, TrUserData).
+skip_32_response_header(<<_:32, Rest/binary>>, Z1, Z2, F, TrUserData) -> dfp_read_field_def_response_header(Rest, Z1, Z2, F, TrUserData).
 
-skip_64_response_header(<<_:64, Rest/binary>>, Z1, Z2, F, TrUserData) ->
-    dfp_read_field_def_response_header(Rest, Z1, Z2, F, TrUserData).
+skip_64_response_header(<<_:64, Rest/binary>>, Z1, Z2, F, TrUserData) -> dfp_read_field_def_response_header(Rest, Z1, Z2, F, TrUserData).
 
-decode_msg_request_header(Bin, TrUserData) ->
-    dfp_read_field_def_request_header(Bin,
-                                      0,
-                                      0,
-                                      0,
-                                      id(<<>>, TrUserData),
-                                      id(<<>>, TrUserData),
-                                      id('$undef', TrUserData),
-                                      id(<<>>, TrUserData),
-                                      TrUserData).
+decode_msg_request_header(Bin, TrUserData) -> dfp_read_field_def_request_header(Bin, 0, 0, 0, id(<<>>, TrUserData), id(<<>>, TrUserData), id('$undef', TrUserData), id(<<>>, TrUserData), TrUserData).
 
-dfp_read_field_def_request_header(<<10, Rest/binary>>,
-                                  Z1,
-                                  Z2,
-                                  F,
-                                  F@_1,
-                                  F@_2,
-                                  F@_3,
-                                  F@_4,
-                                  TrUserData) ->
-    d_field_request_header_catalog(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
-dfp_read_field_def_request_header(<<18, Rest/binary>>,
-                                  Z1,
-                                  Z2,
-                                  F,
-                                  F@_1,
-                                  F@_2,
-                                  F@_3,
-                                  F@_4,
-                                  TrUserData) ->
-    d_field_request_header_schema(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
-dfp_read_field_def_request_header(<<26, Rest/binary>>,
-                                  Z1,
-                                  Z2,
-                                  F,
-                                  F@_1,
-                                  F@_2,
-                                  F@_3,
-                                  F@_4,
-                                  TrUserData) ->
-    d_field_request_header_authorization(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
-dfp_read_field_def_request_header(<<34, Rest/binary>>,
-                                  Z1,
-                                  Z2,
-                                  F,
-                                  F@_1,
-                                  F@_2,
-                                  F@_3,
-                                  F@_4,
-                                  TrUserData) ->
-    d_field_request_header_dbname(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+dfp_read_field_def_request_header(<<10, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> d_field_request_header_catalog(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+dfp_read_field_def_request_header(<<18, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> d_field_request_header_schema(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+dfp_read_field_def_request_header(<<26, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> d_field_request_header_authorization(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+dfp_read_field_def_request_header(<<34, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> d_field_request_header_dbname(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
 dfp_read_field_def_request_header(<<>>, 0, 0, _, F@_1, F@_2, F@_3, F@_4, _) ->
-    S1 = #{catalog => F@_1,
-           schema => F@_2,
-           dbname => F@_4},
-    if F@_3 == '$undef' ->
-           S1;
-       true ->
-           S1#{authorization => F@_3}
+    S1 = #{catalog => F@_1, schema => F@_2, dbname => F@_4},
+    if F@_3 == '$undef' -> S1;
+       true -> S1#{authorization => F@_3}
     end;
-dfp_read_field_def_request_header(Other, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) ->
-    dg_read_field_def_request_header(Other, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
+dfp_read_field_def_request_header(Other, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> dg_read_field_def_request_header(Other, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
 
-dg_read_field_def_request_header(<<1:1, X:7, Rest/binary>>,
-                                 N,
-                                 Acc,
-                                 F,
-                                 F@_1,
-                                 F@_2,
-                                 F@_3,
-                                 F@_4,
-                                 TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_request_header(Rest,
-                                     N + 7,
-                                     X bsl N + Acc,
-                                     F,
-                                     F@_1,
-                                     F@_2,
-                                     F@_3,
-                                     F@_4,
-                                     TrUserData);
-dg_read_field_def_request_header(<<0:1, X:7, Rest/binary>>,
-                                 N,
-                                 Acc,
-                                 _,
-                                 F@_1,
-                                 F@_2,
-                                 F@_3,
-                                 F@_4,
-                                 TrUserData) ->
+dg_read_field_def_request_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData) when N < 32 - 7 -> dg_read_field_def_request_header(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+dg_read_field_def_request_header(<<0:1, X:7, Rest/binary>>, N, Acc, _, F@_1, F@_2, F@_3, F@_4, TrUserData) ->
     Key = X bsl N + Acc,
     case Key of
-        10 ->
-            d_field_request_header_catalog(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
-        18 ->
-            d_field_request_header_schema(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
-        26 ->
-            d_field_request_header_authorization(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
-        34 ->
-            d_field_request_header_dbname(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
+        10 -> d_field_request_header_catalog(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
+        18 -> d_field_request_header_schema(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
+        26 -> d_field_request_header_authorization(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
+        34 -> d_field_request_header_dbname(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
         _ ->
             case Key band 7 of
-                0 ->
-                    skip_varint_request_header(Rest,
-                                               0,
-                                               0,
-                                               Key bsr 3,
-                                               F@_1,
-                                               F@_2,
-                                               F@_3,
-                                               F@_4,
-                                               TrUserData);
-                1 ->
-                    skip_64_request_header(Rest,
-                                           0,
-                                           0,
-                                           Key bsr 3,
-                                           F@_1,
-                                           F@_2,
-                                           F@_3,
-                                           F@_4,
-                                           TrUserData);
-                2 ->
-                    skip_length_delimited_request_header(Rest,
-                                                         0,
-                                                         0,
-                                                         Key bsr 3,
-                                                         F@_1,
-                                                         F@_2,
-                                                         F@_3,
-                                                         F@_4,
-                                                         TrUserData);
-                3 ->
-                    skip_group_request_header(Rest,
-                                              0,
-                                              0,
-                                              Key bsr 3,
-                                              F@_1,
-                                              F@_2,
-                                              F@_3,
-                                              F@_4,
-                                              TrUserData);
-                5 ->
-                    skip_32_request_header(Rest,
-                                           0,
-                                           0,
-                                           Key bsr 3,
-                                           F@_1,
-                                           F@_2,
-                                           F@_3,
-                                           F@_4,
-                                           TrUserData)
+                0 -> skip_varint_request_header(Rest, 0, 0, Key bsr 3, F@_1, F@_2, F@_3, F@_4, TrUserData);
+                1 -> skip_64_request_header(Rest, 0, 0, Key bsr 3, F@_1, F@_2, F@_3, F@_4, TrUserData);
+                2 -> skip_length_delimited_request_header(Rest, 0, 0, Key bsr 3, F@_1, F@_2, F@_3, F@_4, TrUserData);
+                3 -> skip_group_request_header(Rest, 0, 0, Key bsr 3, F@_1, F@_2, F@_3, F@_4, TrUserData);
+                5 -> skip_32_request_header(Rest, 0, 0, Key bsr 3, F@_1, F@_2, F@_3, F@_4, TrUserData)
             end
     end;
 dg_read_field_def_request_header(<<>>, 0, 0, _, F@_1, F@_2, F@_3, F@_4, _) ->
-    S1 = #{catalog => F@_1,
-           schema => F@_2,
-           dbname => F@_4},
-    if F@_3 == '$undef' ->
-           S1;
-       true ->
-           S1#{authorization => F@_3}
+    S1 = #{catalog => F@_1, schema => F@_2, dbname => F@_4},
+    if F@_3 == '$undef' -> S1;
+       true -> S1#{authorization => F@_3}
     end.
 
-d_field_request_header_catalog(<<1:1, X:7, Rest/binary>>,
-                               N,
-                               Acc,
-                               F,
-                               F@_1,
-                               F@_2,
-                               F@_3,
-                               F@_4,
-                               TrUserData)
-    when N < 57 ->
-    d_field_request_header_catalog(Rest,
-                                   N + 7,
-                                   X bsl N + Acc,
-                                   F,
-                                   F@_1,
-                                   F@_2,
-                                   F@_3,
-                                   F@_4,
-                                   TrUserData);
-d_field_request_header_catalog(<<0:1, X:7, Rest/binary>>,
-                               N,
-                               Acc,
-                               F,
-                               _,
-                               F@_2,
-                               F@_3,
-                               F@_4,
-                               TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bytes:Len/binary, Rest2/binary>> = Rest,
-            Bytes2 = binary:copy(Bytes),
-            {id(Bytes2, TrUserData), Rest2}
-        end,
-    dfp_read_field_def_request_header(RestF,
-                                      0,
-                                      0,
-                                      F,
-                                      NewFValue,
-                                      F@_2,
-                                      F@_3,
-                                      F@_4,
-                                      TrUserData).
+d_field_request_header_catalog(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData) when N < 57 -> d_field_request_header_catalog(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+d_field_request_header_catalog(<<0:1, X:7, Rest/binary>>, N, Acc, F, _, F@_2, F@_3, F@_4, TrUserData) ->
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bytes:Len/binary, Rest2/binary>> = Rest, Bytes2 = binary:copy(Bytes), {id(Bytes2, TrUserData), Rest2} end,
+    dfp_read_field_def_request_header(RestF, 0, 0, F, NewFValue, F@_2, F@_3, F@_4, TrUserData).
 
-d_field_request_header_schema(<<1:1, X:7, Rest/binary>>,
-                              N,
-                              Acc,
-                              F,
-                              F@_1,
-                              F@_2,
-                              F@_3,
-                              F@_4,
-                              TrUserData)
-    when N < 57 ->
-    d_field_request_header_schema(Rest,
-                                  N + 7,
-                                  X bsl N + Acc,
-                                  F,
-                                  F@_1,
-                                  F@_2,
-                                  F@_3,
-                                  F@_4,
-                                  TrUserData);
-d_field_request_header_schema(<<0:1, X:7, Rest/binary>>,
-                              N,
-                              Acc,
-                              F,
-                              F@_1,
-                              _,
-                              F@_3,
-                              F@_4,
-                              TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bytes:Len/binary, Rest2/binary>> = Rest,
-            Bytes2 = binary:copy(Bytes),
-            {id(Bytes2, TrUserData), Rest2}
-        end,
-    dfp_read_field_def_request_header(RestF,
-                                      0,
-                                      0,
-                                      F,
-                                      F@_1,
-                                      NewFValue,
-                                      F@_3,
-                                      F@_4,
-                                      TrUserData).
+d_field_request_header_schema(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData) when N < 57 -> d_field_request_header_schema(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+d_field_request_header_schema(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, _, F@_3, F@_4, TrUserData) ->
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bytes:Len/binary, Rest2/binary>> = Rest, Bytes2 = binary:copy(Bytes), {id(Bytes2, TrUserData), Rest2} end,
+    dfp_read_field_def_request_header(RestF, 0, 0, F, F@_1, NewFValue, F@_3, F@_4, TrUserData).
 
-d_field_request_header_authorization(<<1:1, X:7, Rest/binary>>,
-                                     N,
-                                     Acc,
-                                     F,
-                                     F@_1,
-                                     F@_2,
-                                     F@_3,
-                                     F@_4,
-                                     TrUserData)
-    when N < 57 ->
-    d_field_request_header_authorization(Rest,
-                                         N + 7,
-                                         X bsl N + Acc,
-                                         F,
-                                         F@_1,
-                                         F@_2,
-                                         F@_3,
-                                         F@_4,
-                                         TrUserData);
-d_field_request_header_authorization(<<0:1, X:7, Rest/binary>>,
-                                     N,
-                                     Acc,
-                                     F,
-                                     F@_1,
-                                     F@_2,
-                                     Prev,
-                                     F@_4,
-                                     TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bs:Len/binary, Rest2/binary>> = Rest,
-            {id(decode_msg_auth_header(Bs, TrUserData), TrUserData), Rest2}
-        end,
+d_field_request_header_authorization(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData) when N < 57 -> d_field_request_header_authorization(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+d_field_request_header_authorization(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, Prev, F@_4, TrUserData) ->
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bs:Len/binary, Rest2/binary>> = Rest, {id(decode_msg_auth_header(Bs, TrUserData), TrUserData), Rest2} end,
     dfp_read_field_def_request_header(RestF,
                                       0,
                                       0,
                                       F,
                                       F@_1,
                                       F@_2,
-                                      if Prev == '$undef' ->
-                                             NewFValue;
-                                         true ->
-                                             merge_msg_auth_header(Prev, NewFValue, TrUserData)
+                                      if Prev == '$undef' -> NewFValue;
+                                         true -> merge_msg_auth_header(Prev, NewFValue, TrUserData)
                                       end,
                                       F@_4,
                                       TrUserData).
 
-d_field_request_header_dbname(<<1:1, X:7, Rest/binary>>,
-                              N,
-                              Acc,
-                              F,
-                              F@_1,
-                              F@_2,
-                              F@_3,
-                              F@_4,
-                              TrUserData)
-    when N < 57 ->
-    d_field_request_header_dbname(Rest,
-                                  N + 7,
-                                  X bsl N + Acc,
-                                  F,
-                                  F@_1,
-                                  F@_2,
-                                  F@_3,
-                                  F@_4,
-                                  TrUserData);
-d_field_request_header_dbname(<<0:1, X:7, Rest/binary>>,
-                              N,
-                              Acc,
-                              F,
-                              F@_1,
-                              F@_2,
-                              F@_3,
-                              _,
-                              TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bytes:Len/binary, Rest2/binary>> = Rest,
-            Bytes2 = binary:copy(Bytes),
-            {id(Bytes2, TrUserData), Rest2}
-        end,
-    dfp_read_field_def_request_header(RestF,
-                                      0,
-                                      0,
-                                      F,
-                                      F@_1,
-                                      F@_2,
-                                      F@_3,
-                                      NewFValue,
-                                      TrUserData).
+d_field_request_header_dbname(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData) when N < 57 -> d_field_request_header_dbname(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+d_field_request_header_dbname(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, F@_3, _, TrUserData) ->
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bytes:Len/binary, Rest2/binary>> = Rest, Bytes2 = binary:copy(Bytes), {id(Bytes2, TrUserData), Rest2} end,
+    dfp_read_field_def_request_header(RestF, 0, 0, F, F@_1, F@_2, F@_3, NewFValue, TrUserData).
 
-skip_varint_request_header(<<1:1, _:7, Rest/binary>>,
-                           Z1,
-                           Z2,
-                           F,
-                           F@_1,
-                           F@_2,
-                           F@_3,
-                           F@_4,
-                           TrUserData) ->
-    skip_varint_request_header(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
-skip_varint_request_header(<<0:1, _:7, Rest/binary>>,
-                           Z1,
-                           Z2,
-                           F,
-                           F@_1,
-                           F@_2,
-                           F@_3,
-                           F@_4,
-                           TrUserData) ->
-    dfp_read_field_def_request_header(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
+skip_varint_request_header(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> skip_varint_request_header(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+skip_varint_request_header(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> dfp_read_field_def_request_header(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
 
-skip_length_delimited_request_header(<<1:1, X:7, Rest/binary>>,
-                                     N,
-                                     Acc,
-                                     F,
-                                     F@_1,
-                                     F@_2,
-                                     F@_3,
-                                     F@_4,
-                                     TrUserData)
-    when N < 57 ->
-    skip_length_delimited_request_header(Rest,
-                                         N + 7,
-                                         X bsl N + Acc,
-                                         F,
-                                         F@_1,
-                                         F@_2,
-                                         F@_3,
-                                         F@_4,
-                                         TrUserData);
-skip_length_delimited_request_header(<<0:1, X:7, Rest/binary>>,
-                                     N,
-                                     Acc,
-                                     F,
-                                     F@_1,
-                                     F@_2,
-                                     F@_3,
-                                     F@_4,
-                                     TrUserData) ->
+skip_length_delimited_request_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData) when N < 57 -> skip_length_delimited_request_header(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+skip_length_delimited_request_header(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, F@_3, F@_4, TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
     dfp_read_field_def_request_header(Rest2, 0, 0, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
@@ -999,143 +533,75 @@ skip_group_request_header(Bin, _, Z2, FNum, F@_1, F@_2, F@_3, F@_4, TrUserData) 
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_request_header(Rest, 0, Z2, FNum, F@_1, F@_2, F@_3, F@_4, TrUserData).
 
-skip_32_request_header(<<_:32, Rest/binary>>,
-                       Z1,
-                       Z2,
-                       F,
-                       F@_1,
-                       F@_2,
-                       F@_3,
-                       F@_4,
-                       TrUserData) ->
-    dfp_read_field_def_request_header(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
+skip_32_request_header(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> dfp_read_field_def_request_header(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
 
-skip_64_request_header(<<_:64, Rest/binary>>,
-                       Z1,
-                       Z2,
-                       F,
-                       F@_1,
-                       F@_2,
-                       F@_3,
-                       F@_4,
-                       TrUserData) ->
-    dfp_read_field_def_request_header(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
+skip_64_request_header(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) -> dfp_read_field_def_request_header(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
 
-decode_msg_auth_header(Bin, TrUserData) ->
-    dfp_read_field_def_auth_header(Bin, 0, 0, 0, id('$undef', TrUserData), TrUserData).
+decode_msg_auth_header(Bin, TrUserData) -> dfp_read_field_def_auth_header(Bin, 0, 0, 0, id('$undef', TrUserData), TrUserData).
 
-dfp_read_field_def_auth_header(<<10, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    d_field_auth_header_basic(Rest, Z1, Z2, F, F@_1, TrUserData);
-dfp_read_field_def_auth_header(<<18, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    d_field_auth_header_token(Rest, Z1, Z2, F, F@_1, TrUserData);
+dfp_read_field_def_auth_header(<<10, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> d_field_auth_header_basic(Rest, Z1, Z2, F, F@_1, TrUserData);
+dfp_read_field_def_auth_header(<<18, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> d_field_auth_header_token(Rest, Z1, Z2, F, F@_1, TrUserData);
 dfp_read_field_def_auth_header(<<>>, 0, 0, _, F@_1, _) ->
     S1 = #{},
-    if F@_1 == '$undef' ->
-           S1;
-       true ->
-           S1#{auth_scheme => F@_1}
+    if F@_1 == '$undef' -> S1;
+       true -> S1#{auth_scheme => F@_1}
     end;
-dfp_read_field_def_auth_header(Other, Z1, Z2, F, F@_1, TrUserData) ->
-    dg_read_field_def_auth_header(Other, Z1, Z2, F, F@_1, TrUserData).
+dfp_read_field_def_auth_header(Other, Z1, Z2, F, F@_1, TrUserData) -> dg_read_field_def_auth_header(Other, Z1, Z2, F, F@_1, TrUserData).
 
-dg_read_field_def_auth_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_auth_header(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+dg_read_field_def_auth_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 32 - 7 -> dg_read_field_def_auth_header(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
 dg_read_field_def_auth_header(<<0:1, X:7, Rest/binary>>, N, Acc, _, F@_1, TrUserData) ->
     Key = X bsl N + Acc,
     case Key of
-        10 ->
-            d_field_auth_header_basic(Rest, 0, 0, 0, F@_1, TrUserData);
-        18 ->
-            d_field_auth_header_token(Rest, 0, 0, 0, F@_1, TrUserData);
+        10 -> d_field_auth_header_basic(Rest, 0, 0, 0, F@_1, TrUserData);
+        18 -> d_field_auth_header_token(Rest, 0, 0, 0, F@_1, TrUserData);
         _ ->
             case Key band 7 of
-                0 ->
-                    skip_varint_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                1 ->
-                    skip_64_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                2 ->
-                    skip_length_delimited_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                3 ->
-                    skip_group_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                5 ->
-                    skip_32_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData)
+                0 -> skip_varint_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                1 -> skip_64_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                2 -> skip_length_delimited_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                3 -> skip_group_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                5 -> skip_32_auth_header(Rest, 0, 0, Key bsr 3, F@_1, TrUserData)
             end
     end;
 dg_read_field_def_auth_header(<<>>, 0, 0, _, F@_1, _) ->
     S1 = #{},
-    if F@_1 == '$undef' ->
-           S1;
-       true ->
-           S1#{auth_scheme => F@_1}
+    if F@_1 == '$undef' -> S1;
+       true -> S1#{auth_scheme => F@_1}
     end.
 
-d_field_auth_header_basic(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 57 ->
-    d_field_auth_header_basic(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+d_field_auth_header_basic(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> d_field_auth_header_basic(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
 d_field_auth_header_basic(<<0:1, X:7, Rest/binary>>, N, Acc, F, Prev, TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bs:Len/binary, Rest2/binary>> = Rest,
-            {id(decode_msg_basic(Bs, TrUserData), TrUserData), Rest2}
-        end,
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bs:Len/binary, Rest2/binary>> = Rest, {id(decode_msg_basic(Bs, TrUserData), TrUserData), Rest2} end,
     dfp_read_field_def_auth_header(RestF,
                                    0,
                                    0,
                                    F,
                                    case Prev of
-                                       '$undef' ->
-                                           id({basic, NewFValue}, TrUserData);
-                                       {basic, MVPrev} ->
-                                           id({basic,
-                                               merge_msg_basic(MVPrev, NewFValue, TrUserData)},
-                                              TrUserData);
-                                       _ ->
-                                           id({basic, NewFValue}, TrUserData)
+                                       '$undef' -> id({basic, NewFValue}, TrUserData);
+                                       {basic, MVPrev} -> id({basic, merge_msg_basic(MVPrev, NewFValue, TrUserData)}, TrUserData);
+                                       _ -> id({basic, NewFValue}, TrUserData)
                                    end,
                                    TrUserData).
 
-d_field_auth_header_token(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 57 ->
-    d_field_auth_header_token(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+d_field_auth_header_token(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> d_field_auth_header_token(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
 d_field_auth_header_token(<<0:1, X:7, Rest/binary>>, N, Acc, F, Prev, TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bs:Len/binary, Rest2/binary>> = Rest,
-            {id(decode_msg_token(Bs, TrUserData), TrUserData), Rest2}
-        end,
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bs:Len/binary, Rest2/binary>> = Rest, {id(decode_msg_token(Bs, TrUserData), TrUserData), Rest2} end,
     dfp_read_field_def_auth_header(RestF,
                                    0,
                                    0,
                                    F,
                                    case Prev of
-                                       '$undef' ->
-                                           id({token, NewFValue}, TrUserData);
-                                       {token, MVPrev} ->
-                                           id({token,
-                                               merge_msg_token(MVPrev, NewFValue, TrUserData)},
-                                              TrUserData);
-                                       _ ->
-                                           id({token, NewFValue}, TrUserData)
+                                       '$undef' -> id({token, NewFValue}, TrUserData);
+                                       {token, MVPrev} -> id({token, merge_msg_token(MVPrev, NewFValue, TrUserData)}, TrUserData);
+                                       _ -> id({token, NewFValue}, TrUserData)
                                    end,
                                    TrUserData).
 
-skip_varint_auth_header(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    skip_varint_auth_header(Rest, Z1, Z2, F, F@_1, TrUserData);
-skip_varint_auth_header(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_auth_header(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_varint_auth_header(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> skip_varint_auth_header(Rest, Z1, Z2, F, F@_1, TrUserData);
+skip_varint_auth_header(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_auth_header(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-skip_length_delimited_auth_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 57 ->
-    skip_length_delimited_auth_header(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
-skip_length_delimited_auth_header(<<0:1, X:7, Rest/binary>>,
-                                  N,
-                                  Acc,
-                                  F,
-                                  F@_1,
-                                  TrUserData) ->
+skip_length_delimited_auth_header(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> skip_length_delimited_auth_header(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+skip_length_delimited_auth_header(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
     dfp_read_field_def_auth_header(Rest2, 0, 0, F, F@_1, TrUserData).
@@ -1144,98 +610,49 @@ skip_group_auth_header(Bin, _, Z2, FNum, F@_1, TrUserData) ->
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_auth_header(Rest, 0, Z2, FNum, F@_1, TrUserData).
 
-skip_32_auth_header(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_auth_header(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_32_auth_header(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_auth_header(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-skip_64_auth_header(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_auth_header(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_64_auth_header(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_auth_header(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-decode_msg_basic(Bin, TrUserData) ->
-    dfp_read_field_def_basic(Bin,
-                             0,
-                             0,
-                             0,
-                             id(<<>>, TrUserData),
-                             id(<<>>, TrUserData),
-                             TrUserData).
+decode_msg_basic(Bin, TrUserData) -> dfp_read_field_def_basic(Bin, 0, 0, 0, id(<<>>, TrUserData), id(<<>>, TrUserData), TrUserData).
 
-dfp_read_field_def_basic(<<10, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) ->
-    d_field_basic_username(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData);
-dfp_read_field_def_basic(<<18, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) ->
-    d_field_basic_password(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData);
-dfp_read_field_def_basic(<<>>, 0, 0, _, F@_1, F@_2, _) ->
-    #{username => F@_1, password => F@_2};
-dfp_read_field_def_basic(Other, Z1, Z2, F, F@_1, F@_2, TrUserData) ->
-    dg_read_field_def_basic(Other, Z1, Z2, F, F@_1, F@_2, TrUserData).
+dfp_read_field_def_basic(<<10, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) -> d_field_basic_username(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData);
+dfp_read_field_def_basic(<<18, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) -> d_field_basic_password(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData);
+dfp_read_field_def_basic(<<>>, 0, 0, _, F@_1, F@_2, _) -> #{username => F@_1, password => F@_2};
+dfp_read_field_def_basic(Other, Z1, Z2, F, F@_1, F@_2, TrUserData) -> dg_read_field_def_basic(Other, Z1, Z2, F, F@_1, F@_2, TrUserData).
 
-dg_read_field_def_basic(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_basic(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, TrUserData);
+dg_read_field_def_basic(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData) when N < 32 - 7 -> dg_read_field_def_basic(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, TrUserData);
 dg_read_field_def_basic(<<0:1, X:7, Rest/binary>>, N, Acc, _, F@_1, F@_2, TrUserData) ->
     Key = X bsl N + Acc,
     case Key of
-        10 ->
-            d_field_basic_username(Rest, 0, 0, 0, F@_1, F@_2, TrUserData);
-        18 ->
-            d_field_basic_password(Rest, 0, 0, 0, F@_1, F@_2, TrUserData);
+        10 -> d_field_basic_username(Rest, 0, 0, 0, F@_1, F@_2, TrUserData);
+        18 -> d_field_basic_password(Rest, 0, 0, 0, F@_1, F@_2, TrUserData);
         _ ->
             case Key band 7 of
-                0 ->
-                    skip_varint_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData);
-                1 ->
-                    skip_64_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData);
-                2 ->
-                    skip_length_delimited_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData);
-                3 ->
-                    skip_group_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData);
-                5 ->
-                    skip_32_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData)
+                0 -> skip_varint_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData);
+                1 -> skip_64_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData);
+                2 -> skip_length_delimited_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData);
+                3 -> skip_group_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData);
+                5 -> skip_32_basic(Rest, 0, 0, Key bsr 3, F@_1, F@_2, TrUserData)
             end
     end;
-dg_read_field_def_basic(<<>>, 0, 0, _, F@_1, F@_2, _) ->
-    #{username => F@_1, password => F@_2}.
+dg_read_field_def_basic(<<>>, 0, 0, _, F@_1, F@_2, _) -> #{username => F@_1, password => F@_2}.
 
-d_field_basic_username(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData)
-    when N < 57 ->
-    d_field_basic_username(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, TrUserData);
+d_field_basic_username(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData) when N < 57 -> d_field_basic_username(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, TrUserData);
 d_field_basic_username(<<0:1, X:7, Rest/binary>>, N, Acc, F, _, F@_2, TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bytes:Len/binary, Rest2/binary>> = Rest,
-            Bytes2 = binary:copy(Bytes),
-            {id(Bytes2, TrUserData), Rest2}
-        end,
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bytes:Len/binary, Rest2/binary>> = Rest, Bytes2 = binary:copy(Bytes), {id(Bytes2, TrUserData), Rest2} end,
     dfp_read_field_def_basic(RestF, 0, 0, F, NewFValue, F@_2, TrUserData).
 
-d_field_basic_password(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData)
-    when N < 57 ->
-    d_field_basic_password(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, TrUserData);
+d_field_basic_password(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData) when N < 57 -> d_field_basic_password(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, TrUserData);
 d_field_basic_password(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, _, TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bytes:Len/binary, Rest2/binary>> = Rest,
-            Bytes2 = binary:copy(Bytes),
-            {id(Bytes2, TrUserData), Rest2}
-        end,
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bytes:Len/binary, Rest2/binary>> = Rest, Bytes2 = binary:copy(Bytes), {id(Bytes2, TrUserData), Rest2} end,
     dfp_read_field_def_basic(RestF, 0, 0, F, F@_1, NewFValue, TrUserData).
 
-skip_varint_basic(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) ->
-    skip_varint_basic(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData);
-skip_varint_basic(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) ->
-    dfp_read_field_def_basic(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData).
+skip_varint_basic(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) -> skip_varint_basic(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData);
+skip_varint_basic(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) -> dfp_read_field_def_basic(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData).
 
-skip_length_delimited_basic(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData)
-    when N < 57 ->
-    skip_length_delimited_basic(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, TrUserData);
-skip_length_delimited_basic(<<0:1, X:7, Rest/binary>>,
-                            N,
-                            Acc,
-                            F,
-                            F@_1,
-                            F@_2,
-                            TrUserData) ->
+skip_length_delimited_basic(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData) when N < 57 -> skip_length_delimited_basic(Rest, N + 7, X bsl N + Acc, F, F@_1, F@_2, TrUserData);
+skip_length_delimited_basic(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, F@_2, TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
     dfp_read_field_def_basic(Rest2, 0, 0, F, F@_1, F@_2, TrUserData).
@@ -1244,67 +661,41 @@ skip_group_basic(Bin, _, Z2, FNum, F@_1, F@_2, TrUserData) ->
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_basic(Rest, 0, Z2, FNum, F@_1, F@_2, TrUserData).
 
-skip_32_basic(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) ->
-    dfp_read_field_def_basic(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData).
+skip_32_basic(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) -> dfp_read_field_def_basic(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData).
 
-skip_64_basic(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) ->
-    dfp_read_field_def_basic(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData).
+skip_64_basic(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, F@_2, TrUserData) -> dfp_read_field_def_basic(Rest, Z1, Z2, F, F@_1, F@_2, TrUserData).
 
-decode_msg_token(Bin, TrUserData) ->
-    dfp_read_field_def_token(Bin, 0, 0, 0, id(<<>>, TrUserData), TrUserData).
+decode_msg_token(Bin, TrUserData) -> dfp_read_field_def_token(Bin, 0, 0, 0, id(<<>>, TrUserData), TrUserData).
 
-dfp_read_field_def_token(<<10, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    d_field_token_token(Rest, Z1, Z2, F, F@_1, TrUserData);
-dfp_read_field_def_token(<<>>, 0, 0, _, F@_1, _) ->
-    #{token => F@_1};
-dfp_read_field_def_token(Other, Z1, Z2, F, F@_1, TrUserData) ->
-    dg_read_field_def_token(Other, Z1, Z2, F, F@_1, TrUserData).
+dfp_read_field_def_token(<<10, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> d_field_token_token(Rest, Z1, Z2, F, F@_1, TrUserData);
+dfp_read_field_def_token(<<>>, 0, 0, _, F@_1, _) -> #{token => F@_1};
+dfp_read_field_def_token(Other, Z1, Z2, F, F@_1, TrUserData) -> dg_read_field_def_token(Other, Z1, Z2, F, F@_1, TrUserData).
 
-dg_read_field_def_token(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_token(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+dg_read_field_def_token(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 32 - 7 -> dg_read_field_def_token(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
 dg_read_field_def_token(<<0:1, X:7, Rest/binary>>, N, Acc, _, F@_1, TrUserData) ->
     Key = X bsl N + Acc,
     case Key of
-        10 ->
-            d_field_token_token(Rest, 0, 0, 0, F@_1, TrUserData);
+        10 -> d_field_token_token(Rest, 0, 0, 0, F@_1, TrUserData);
         _ ->
             case Key band 7 of
-                0 ->
-                    skip_varint_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                1 ->
-                    skip_64_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                2 ->
-                    skip_length_delimited_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                3 ->
-                    skip_group_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                5 ->
-                    skip_32_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData)
+                0 -> skip_varint_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                1 -> skip_64_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                2 -> skip_length_delimited_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                3 -> skip_group_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                5 -> skip_32_token(Rest, 0, 0, Key bsr 3, F@_1, TrUserData)
             end
     end;
-dg_read_field_def_token(<<>>, 0, 0, _, F@_1, _) ->
-    #{token => F@_1}.
+dg_read_field_def_token(<<>>, 0, 0, _, F@_1, _) -> #{token => F@_1}.
 
-d_field_token_token(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 ->
-    d_field_token_token(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+d_field_token_token(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> d_field_token_token(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
 d_field_token_token(<<0:1, X:7, Rest/binary>>, N, Acc, F, _, TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bytes:Len/binary, Rest2/binary>> = Rest,
-            Bytes2 = binary:copy(Bytes),
-            {id(Bytes2, TrUserData), Rest2}
-        end,
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bytes:Len/binary, Rest2/binary>> = Rest, Bytes2 = binary:copy(Bytes), {id(Bytes2, TrUserData), Rest2} end,
     dfp_read_field_def_token(RestF, 0, 0, F, NewFValue, TrUserData).
 
-skip_varint_token(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    skip_varint_token(Rest, Z1, Z2, F, F@_1, TrUserData);
-skip_varint_token(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_token(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_varint_token(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> skip_varint_token(Rest, Z1, Z2, F, F@_1, TrUserData);
+skip_varint_token(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_token(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-skip_length_delimited_token(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 57 ->
-    skip_length_delimited_token(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+skip_length_delimited_token(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> skip_length_delimited_token(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
 skip_length_delimited_token(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
@@ -1314,73 +705,42 @@ skip_group_token(Bin, _, Z2, FNum, F@_1, TrUserData) ->
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_token(Rest, 0, Z2, FNum, F@_1, TrUserData).
 
-skip_32_token(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_token(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_32_token(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_token(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-skip_64_token(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_token(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_64_token(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_token(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-decode_msg_affected_rows(Bin, TrUserData) ->
-    dfp_read_field_def_affected_rows(Bin, 0, 0, 0, id(0, TrUserData), TrUserData).
+decode_msg_affected_rows(Bin, TrUserData) -> dfp_read_field_def_affected_rows(Bin, 0, 0, 0, id(0, TrUserData), TrUserData).
 
-dfp_read_field_def_affected_rows(<<8, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    d_field_affected_rows_value(Rest, Z1, Z2, F, F@_1, TrUserData);
-dfp_read_field_def_affected_rows(<<>>, 0, 0, _, F@_1, _) ->
-    #{value => F@_1};
-dfp_read_field_def_affected_rows(Other, Z1, Z2, F, F@_1, TrUserData) ->
-    dg_read_field_def_affected_rows(Other, Z1, Z2, F, F@_1, TrUserData).
+dfp_read_field_def_affected_rows(<<8, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> d_field_affected_rows_value(Rest, Z1, Z2, F, F@_1, TrUserData);
+dfp_read_field_def_affected_rows(<<>>, 0, 0, _, F@_1, _) -> #{value => F@_1};
+dfp_read_field_def_affected_rows(Other, Z1, Z2, F, F@_1, TrUserData) -> dg_read_field_def_affected_rows(Other, Z1, Z2, F, F@_1, TrUserData).
 
-dg_read_field_def_affected_rows(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_affected_rows(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+dg_read_field_def_affected_rows(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 32 - 7 -> dg_read_field_def_affected_rows(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
 dg_read_field_def_affected_rows(<<0:1, X:7, Rest/binary>>, N, Acc, _, F@_1, TrUserData) ->
     Key = X bsl N + Acc,
     case Key of
-        8 ->
-            d_field_affected_rows_value(Rest, 0, 0, 0, F@_1, TrUserData);
+        8 -> d_field_affected_rows_value(Rest, 0, 0, 0, F@_1, TrUserData);
         _ ->
             case Key band 7 of
-                0 ->
-                    skip_varint_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                1 ->
-                    skip_64_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                2 ->
-                    skip_length_delimited_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                3 ->
-                    skip_group_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                5 ->
-                    skip_32_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData)
+                0 -> skip_varint_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                1 -> skip_64_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                2 -> skip_length_delimited_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                3 -> skip_group_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                5 -> skip_32_affected_rows(Rest, 0, 0, Key bsr 3, F@_1, TrUserData)
             end
     end;
-dg_read_field_def_affected_rows(<<>>, 0, 0, _, F@_1, _) ->
-    #{value => F@_1}.
+dg_read_field_def_affected_rows(<<>>, 0, 0, _, F@_1, _) -> #{value => F@_1}.
 
-d_field_affected_rows_value(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 57 ->
-    d_field_affected_rows_value(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+d_field_affected_rows_value(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> d_field_affected_rows_value(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
 d_field_affected_rows_value(<<0:1, X:7, Rest/binary>>, N, Acc, F, _, TrUserData) ->
     {NewFValue, RestF} = {id((X bsl N + Acc) band 4294967295, TrUserData), Rest},
     dfp_read_field_def_affected_rows(RestF, 0, 0, F, NewFValue, TrUserData).
 
-skip_varint_affected_rows(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    skip_varint_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData);
-skip_varint_affected_rows(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_varint_affected_rows(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> skip_varint_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData);
+skip_varint_affected_rows(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-skip_length_delimited_affected_rows(<<1:1, X:7, Rest/binary>>,
-                                    N,
-                                    Acc,
-                                    F,
-                                    F@_1,
-                                    TrUserData)
-    when N < 57 ->
-    skip_length_delimited_affected_rows(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
-skip_length_delimited_affected_rows(<<0:1, X:7, Rest/binary>>,
-                                    N,
-                                    Acc,
-                                    F,
-                                    F@_1,
-                                    TrUserData) ->
+skip_length_delimited_affected_rows(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> skip_length_delimited_affected_rows(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+skip_length_delimited_affected_rows(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
     dfp_read_field_def_affected_rows(Rest2, 0, 0, F, F@_1, TrUserData).
@@ -1389,112 +749,57 @@ skip_group_affected_rows(Bin, _, Z2, FNum, F@_1, TrUserData) ->
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_affected_rows(Rest, 0, Z2, FNum, F@_1, TrUserData).
 
-skip_32_affected_rows(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_32_affected_rows(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-skip_64_affected_rows(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_64_affected_rows(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-decode_msg_flight_metadata(Bin, TrUserData) ->
-    dfp_read_field_def_flight_metadata(Bin, 0, 0, 0, id('$undef', TrUserData), TrUserData).
+decode_msg_flight_metadata(Bin, TrUserData) -> dfp_read_field_def_flight_metadata(Bin, 0, 0, 0, id('$undef', TrUserData), TrUserData).
 
-dfp_read_field_def_flight_metadata(<<10, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    d_field_flight_metadata_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData);
+dfp_read_field_def_flight_metadata(<<10, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> d_field_flight_metadata_affected_rows(Rest, Z1, Z2, F, F@_1, TrUserData);
 dfp_read_field_def_flight_metadata(<<>>, 0, 0, _, F@_1, _) ->
     S1 = #{},
-    if F@_1 == '$undef' ->
-           S1;
-       true ->
-           S1#{affected_rows => F@_1}
+    if F@_1 == '$undef' -> S1;
+       true -> S1#{affected_rows => F@_1}
     end;
-dfp_read_field_def_flight_metadata(Other, Z1, Z2, F, F@_1, TrUserData) ->
-    dg_read_field_def_flight_metadata(Other, Z1, Z2, F, F@_1, TrUserData).
+dfp_read_field_def_flight_metadata(Other, Z1, Z2, F, F@_1, TrUserData) -> dg_read_field_def_flight_metadata(Other, Z1, Z2, F, F@_1, TrUserData).
 
-dg_read_field_def_flight_metadata(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData)
-    when N < 32 - 7 ->
-    dg_read_field_def_flight_metadata(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
-dg_read_field_def_flight_metadata(<<0:1, X:7, Rest/binary>>,
-                                  N,
-                                  Acc,
-                                  _,
-                                  F@_1,
-                                  TrUserData) ->
+dg_read_field_def_flight_metadata(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 32 - 7 -> dg_read_field_def_flight_metadata(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+dg_read_field_def_flight_metadata(<<0:1, X:7, Rest/binary>>, N, Acc, _, F@_1, TrUserData) ->
     Key = X bsl N + Acc,
     case Key of
-        10 ->
-            d_field_flight_metadata_affected_rows(Rest, 0, 0, 0, F@_1, TrUserData);
+        10 -> d_field_flight_metadata_affected_rows(Rest, 0, 0, 0, F@_1, TrUserData);
         _ ->
             case Key band 7 of
-                0 ->
-                    skip_varint_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                1 ->
-                    skip_64_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                2 ->
-                    skip_length_delimited_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                3 ->
-                    skip_group_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
-                5 ->
-                    skip_32_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData)
+                0 -> skip_varint_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                1 -> skip_64_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                2 -> skip_length_delimited_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                3 -> skip_group_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData);
+                5 -> skip_32_flight_metadata(Rest, 0, 0, Key bsr 3, F@_1, TrUserData)
             end
     end;
 dg_read_field_def_flight_metadata(<<>>, 0, 0, _, F@_1, _) ->
     S1 = #{},
-    if F@_1 == '$undef' ->
-           S1;
-       true ->
-           S1#{affected_rows => F@_1}
+    if F@_1 == '$undef' -> S1;
+       true -> S1#{affected_rows => F@_1}
     end.
 
-d_field_flight_metadata_affected_rows(<<1:1, X:7, Rest/binary>>,
-                                      N,
-                                      Acc,
-                                      F,
-                                      F@_1,
-                                      TrUserData)
-    when N < 57 ->
-    d_field_flight_metadata_affected_rows(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
-d_field_flight_metadata_affected_rows(<<0:1, X:7, Rest/binary>>,
-                                      N,
-                                      Acc,
-                                      F,
-                                      Prev,
-                                      TrUserData) ->
-    {NewFValue, RestF} =
-        begin
-            Len = X bsl N + Acc,
-            <<Bs:Len/binary, Rest2/binary>> = Rest,
-            {id(decode_msg_affected_rows(Bs, TrUserData), TrUserData), Rest2}
-        end,
+d_field_flight_metadata_affected_rows(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> d_field_flight_metadata_affected_rows(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+d_field_flight_metadata_affected_rows(<<0:1, X:7, Rest/binary>>, N, Acc, F, Prev, TrUserData) ->
+    {NewFValue, RestF} = begin Len = X bsl N + Acc, <<Bs:Len/binary, Rest2/binary>> = Rest, {id(decode_msg_affected_rows(Bs, TrUserData), TrUserData), Rest2} end,
     dfp_read_field_def_flight_metadata(RestF,
                                        0,
                                        0,
                                        F,
-                                       if Prev == '$undef' ->
-                                              NewFValue;
-                                          true ->
-                                              merge_msg_affected_rows(Prev, NewFValue, TrUserData)
+                                       if Prev == '$undef' -> NewFValue;
+                                          true -> merge_msg_affected_rows(Prev, NewFValue, TrUserData)
                                        end,
                                        TrUserData).
 
-skip_varint_flight_metadata(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    skip_varint_flight_metadata(Rest, Z1, Z2, F, F@_1, TrUserData);
-skip_varint_flight_metadata(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_flight_metadata(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_varint_flight_metadata(<<1:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> skip_varint_flight_metadata(Rest, Z1, Z2, F, F@_1, TrUserData);
+skip_varint_flight_metadata(<<0:1, _:7, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_flight_metadata(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-skip_length_delimited_flight_metadata(<<1:1, X:7, Rest/binary>>,
-                                      N,
-                                      Acc,
-                                      F,
-                                      F@_1,
-                                      TrUserData)
-    when N < 57 ->
-    skip_length_delimited_flight_metadata(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
-skip_length_delimited_flight_metadata(<<0:1, X:7, Rest/binary>>,
-                                      N,
-                                      Acc,
-                                      F,
-                                      F@_1,
-                                      TrUserData) ->
+skip_length_delimited_flight_metadata(<<1:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) when N < 57 -> skip_length_delimited_flight_metadata(Rest, N + 7, X bsl N + Acc, F, F@_1, TrUserData);
+skip_length_delimited_flight_metadata(<<0:1, X:7, Rest/binary>>, N, Acc, F, F@_1, TrUserData) ->
     Length = X bsl N + Acc,
     <<_:Length/binary, Rest2/binary>> = Rest,
     dfp_read_field_def_flight_metadata(Rest2, 0, 0, F, F@_1, TrUserData).
@@ -1503,11 +808,9 @@ skip_group_flight_metadata(Bin, _, Z2, FNum, F@_1, TrUserData) ->
     {_, Rest} = read_group(Bin, FNum),
     dfp_read_field_def_flight_metadata(Rest, 0, Z2, FNum, F@_1, TrUserData).
 
-skip_32_flight_metadata(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_flight_metadata(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_32_flight_metadata(<<_:32, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_flight_metadata(Rest, Z1, Z2, F, F@_1, TrUserData).
 
-skip_64_flight_metadata(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) ->
-    dfp_read_field_def_flight_metadata(Rest, Z1, Z2, F, F@_1, TrUserData).
+skip_64_flight_metadata(<<_:64, Rest/binary>>, Z1, Z2, F, F@_1, TrUserData) -> dfp_read_field_def_flight_metadata(Rest, Z1, Z2, F, F@_1, TrUserData).
 
 read_group(Bin, FieldNum) ->
     {NumBytes, EndTagLen} = read_gr_b(Bin, 0, 0, 0, 0, FieldNum),
@@ -1526,9 +829,11 @@ read_group(Bin, FieldNum) ->
 %% (The only time the same group field number could occur would
 %% be in a nested sub message, but then it would be inside a
 %% length-delimited entry, which we skip-read by length.)
-read_gr_b(<<1:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen, FieldNum) when N < 32 - 7 ->
-    read_gr_b(Tl, N + 7, X bsl N + Acc, NumBytes, TagLen + 1, FieldNum);
-read_gr_b(<<0:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen, FieldNum) ->
+read_gr_b(<<1:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen, FieldNum)
+  when N < (32-7) ->
+    read_gr_b(Tl, N+7, X bsl N + Acc, NumBytes, TagLen+1, FieldNum);
+read_gr_b(<<0:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen,
+          FieldNum) ->
     Key = X bsl N + Acc,
     TagLen1 = TagLen + 1,
     case {Key bsr 3, Key band 7} of
@@ -1550,844 +855,520 @@ read_gr_b(<<0:1, X:7, Tl/binary>>, N, Acc, NumBytes, TagLen, FieldNum) ->
             read_gr_b(Tl2, 0, 0, NumBytes + TagLen1 + 4, 0, FieldNum)
     end.
 
-read_gr_vi(<<1:1, _:7, Tl/binary>>, N, NumBytes, FieldNum) when N < 64 - 7 ->
-    read_gr_vi(Tl, N + 7, NumBytes + 1, FieldNum);
+read_gr_vi(<<1:1, _:7, Tl/binary>>, N, NumBytes, FieldNum)
+  when N < (64-7) ->
+    read_gr_vi(Tl, N+7, NumBytes+1, FieldNum);
 read_gr_vi(<<0:1, _:7, Tl/binary>>, _, NumBytes, FieldNum) ->
-    read_gr_b(Tl, 0, 0, NumBytes + 1, 0, FieldNum).
+    read_gr_b(Tl, 0, 0, NumBytes+1, 0, FieldNum).
 
-read_gr_ld(<<1:1, X:7, Tl/binary>>, N, Acc, NumBytes, FieldNum) when N < 64 - 7 ->
-    read_gr_ld(Tl, N + 7, X bsl N + Acc, NumBytes + 1, FieldNum);
+read_gr_ld(<<1:1, X:7, Tl/binary>>, N, Acc, NumBytes, FieldNum)
+  when N < (64-7) ->
+    read_gr_ld(Tl, N+7, X bsl N + Acc, NumBytes+1, FieldNum);
 read_gr_ld(<<0:1, X:7, Tl/binary>>, N, Acc, NumBytes, FieldNum) ->
     Len = X bsl N + Acc,
     NumBytes1 = NumBytes + 1,
     <<_:Len/binary, Tl2/binary>> = Tl,
     read_gr_b(Tl2, 0, 0, NumBytes1 + Len, 0, FieldNum).
 
-merge_msgs(Prev, New, MsgName) when is_atom(MsgName) ->
-    merge_msgs(Prev, New, MsgName, []).
+merge_msgs(Prev, New, MsgName) when is_atom(MsgName) -> merge_msgs(Prev, New, MsgName, []).
 
 merge_msgs(Prev, New, MsgName, Opts) ->
     TrUserData = proplists:get_value(user_data, Opts),
     case MsgName of
-        response_header ->
-            merge_msg_response_header(Prev, New, TrUserData);
-        request_header ->
-            merge_msg_request_header(Prev, New, TrUserData);
-        auth_header ->
-            merge_msg_auth_header(Prev, New, TrUserData);
-        basic ->
-            merge_msg_basic(Prev, New, TrUserData);
-        token ->
-            merge_msg_token(Prev, New, TrUserData);
-        affected_rows ->
-            merge_msg_affected_rows(Prev, New, TrUserData);
-        flight_metadata ->
-            merge_msg_flight_metadata(Prev, New, TrUserData)
+        response_header -> merge_msg_response_header(Prev, New, TrUserData);
+        request_header -> merge_msg_request_header(Prev, New, TrUserData);
+        auth_header -> merge_msg_auth_header(Prev, New, TrUserData);
+        basic -> merge_msg_basic(Prev, New, TrUserData);
+        token -> merge_msg_token(Prev, New, TrUserData);
+        affected_rows -> merge_msg_affected_rows(Prev, New, TrUserData);
+        flight_metadata -> merge_msg_flight_metadata(Prev, New, TrUserData)
     end.
 
--compile({nowarn_unused_function, merge_msg_response_header/3}).
+-compile({nowarn_unused_function,merge_msg_response_header/3}).
+merge_msg_response_header(_Prev, New, _TrUserData) -> New.
 
-merge_msg_response_header(_Prev, New, _TrUserData) ->
-    New.
-
--compile({nowarn_unused_function, merge_msg_request_header/3}).
-
+-compile({nowarn_unused_function,merge_msg_request_header/3}).
 merge_msg_request_header(PMsg, NMsg, TrUserData) ->
     S1 = #{},
     S2 = case {PMsg, NMsg} of
-             {_, #{catalog := NFcatalog}} ->
-                 S1#{catalog => NFcatalog};
-             {#{catalog := PFcatalog}, _} ->
-                 S1#{catalog => PFcatalog};
-             _ ->
-                 S1
+             {_, #{catalog := NFcatalog}} -> S1#{catalog => NFcatalog};
+             {#{catalog := PFcatalog}, _} -> S1#{catalog => PFcatalog};
+             _ -> S1
          end,
     S3 = case {PMsg, NMsg} of
-             {_, #{schema := NFschema}} ->
-                 S2#{schema => NFschema};
-             {#{schema := PFschema}, _} ->
-                 S2#{schema => PFschema};
-             _ ->
-                 S2
+             {_, #{schema := NFschema}} -> S2#{schema => NFschema};
+             {#{schema := PFschema}, _} -> S2#{schema => PFschema};
+             _ -> S2
          end,
     S4 = case {PMsg, NMsg} of
-             {#{authorization := PFauthorization}, #{authorization := NFauthorization}} ->
-                 S3#{authorization =>
-                         merge_msg_auth_header(PFauthorization, NFauthorization, TrUserData)};
-             {_, #{authorization := NFauthorization}} ->
-                 S3#{authorization => NFauthorization};
-             {#{authorization := PFauthorization}, _} ->
-                 S3#{authorization => PFauthorization};
-             {_, _} ->
-                 S3
+             {#{authorization := PFauthorization}, #{authorization := NFauthorization}} -> S3#{authorization => merge_msg_auth_header(PFauthorization, NFauthorization, TrUserData)};
+             {_, #{authorization := NFauthorization}} -> S3#{authorization => NFauthorization};
+             {#{authorization := PFauthorization}, _} -> S3#{authorization => PFauthorization};
+             {_, _} -> S3
          end,
     case {PMsg, NMsg} of
-        {_, #{dbname := NFdbname}} ->
-            S4#{dbname => NFdbname};
-        {#{dbname := PFdbname}, _} ->
-            S4#{dbname => PFdbname};
-        _ ->
-            S4
+        {_, #{dbname := NFdbname}} -> S4#{dbname => NFdbname};
+        {#{dbname := PFdbname}, _} -> S4#{dbname => PFdbname};
+        _ -> S4
     end.
 
--compile({nowarn_unused_function, merge_msg_auth_header/3}).
-
+-compile({nowarn_unused_function,merge_msg_auth_header/3}).
 merge_msg_auth_header(PMsg, NMsg, TrUserData) ->
     S1 = #{},
     case {PMsg, NMsg} of
-        {#{auth_scheme := {basic, OPFauth_scheme}}, #{auth_scheme := {basic, ONFauth_scheme}}} ->
-            S1#{auth_scheme =>
-                    {basic, merge_msg_basic(OPFauth_scheme, ONFauth_scheme, TrUserData)}};
-        {#{auth_scheme := {token, OPFauth_scheme}}, #{auth_scheme := {token, ONFauth_scheme}}} ->
-            S1#{auth_scheme =>
-                    {token, merge_msg_token(OPFauth_scheme, ONFauth_scheme, TrUserData)}};
-        {_, #{auth_scheme := NFauth_scheme}} ->
-            S1#{auth_scheme => NFauth_scheme};
-        {#{auth_scheme := PFauth_scheme}, _} ->
-            S1#{auth_scheme => PFauth_scheme};
-        {_, _} ->
-            S1
+        {#{auth_scheme := {basic, OPFauth_scheme}}, #{auth_scheme := {basic, ONFauth_scheme}}} -> S1#{auth_scheme => {basic, merge_msg_basic(OPFauth_scheme, ONFauth_scheme, TrUserData)}};
+        {#{auth_scheme := {token, OPFauth_scheme}}, #{auth_scheme := {token, ONFauth_scheme}}} -> S1#{auth_scheme => {token, merge_msg_token(OPFauth_scheme, ONFauth_scheme, TrUserData)}};
+        {_, #{auth_scheme := NFauth_scheme}} -> S1#{auth_scheme => NFauth_scheme};
+        {#{auth_scheme := PFauth_scheme}, _} -> S1#{auth_scheme => PFauth_scheme};
+        {_, _} -> S1
     end.
 
--compile({nowarn_unused_function, merge_msg_basic/3}).
-
+-compile({nowarn_unused_function,merge_msg_basic/3}).
 merge_msg_basic(PMsg, NMsg, _) ->
     S1 = #{},
     S2 = case {PMsg, NMsg} of
-             {_, #{username := NFusername}} ->
-                 S1#{username => NFusername};
-             {#{username := PFusername}, _} ->
-                 S1#{username => PFusername};
-             _ ->
-                 S1
+             {_, #{username := NFusername}} -> S1#{username => NFusername};
+             {#{username := PFusername}, _} -> S1#{username => PFusername};
+             _ -> S1
          end,
     case {PMsg, NMsg} of
-        {_, #{password := NFpassword}} ->
-            S2#{password => NFpassword};
-        {#{password := PFpassword}, _} ->
-            S2#{password => PFpassword};
-        _ ->
-            S2
+        {_, #{password := NFpassword}} -> S2#{password => NFpassword};
+        {#{password := PFpassword}, _} -> S2#{password => PFpassword};
+        _ -> S2
     end.
 
--compile({nowarn_unused_function, merge_msg_token/3}).
-
+-compile({nowarn_unused_function,merge_msg_token/3}).
 merge_msg_token(PMsg, NMsg, _) ->
     S1 = #{},
     case {PMsg, NMsg} of
-        {_, #{token := NFtoken}} ->
-            S1#{token => NFtoken};
-        {#{token := PFtoken}, _} ->
-            S1#{token => PFtoken};
-        _ ->
-            S1
+        {_, #{token := NFtoken}} -> S1#{token => NFtoken};
+        {#{token := PFtoken}, _} -> S1#{token => PFtoken};
+        _ -> S1
     end.
 
--compile({nowarn_unused_function, merge_msg_affected_rows/3}).
-
+-compile({nowarn_unused_function,merge_msg_affected_rows/3}).
 merge_msg_affected_rows(PMsg, NMsg, _) ->
     S1 = #{},
     case {PMsg, NMsg} of
-        {_, #{value := NFvalue}} ->
-            S1#{value => NFvalue};
-        {#{value := PFvalue}, _} ->
-            S1#{value => PFvalue};
-        _ ->
-            S1
+        {_, #{value := NFvalue}} -> S1#{value => NFvalue};
+        {#{value := PFvalue}, _} -> S1#{value => PFvalue};
+        _ -> S1
     end.
 
--compile({nowarn_unused_function, merge_msg_flight_metadata/3}).
-
+-compile({nowarn_unused_function,merge_msg_flight_metadata/3}).
 merge_msg_flight_metadata(PMsg, NMsg, TrUserData) ->
     S1 = #{},
     case {PMsg, NMsg} of
-        {#{affected_rows := PFaffected_rows}, #{affected_rows := NFaffected_rows}} ->
-            S1#{affected_rows =>
-                    merge_msg_affected_rows(PFaffected_rows, NFaffected_rows, TrUserData)};
-        {_, #{affected_rows := NFaffected_rows}} ->
-            S1#{affected_rows => NFaffected_rows};
-        {#{affected_rows := PFaffected_rows}, _} ->
-            S1#{affected_rows => PFaffected_rows};
-        {_, _} ->
-            S1
+        {#{affected_rows := PFaffected_rows}, #{affected_rows := NFaffected_rows}} -> S1#{affected_rows => merge_msg_affected_rows(PFaffected_rows, NFaffected_rows, TrUserData)};
+        {_, #{affected_rows := NFaffected_rows}} -> S1#{affected_rows => NFaffected_rows};
+        {#{affected_rows := PFaffected_rows}, _} -> S1#{affected_rows => PFaffected_rows};
+        {_, _} -> S1
     end.
 
-verify_msg(Msg, MsgName) when is_atom(MsgName) ->
-    verify_msg(Msg, MsgName, []).
+
+verify_msg(Msg, MsgName) when is_atom(MsgName) -> verify_msg(Msg, MsgName, []).
 
 verify_msg(Msg, MsgName, Opts) ->
     TrUserData = proplists:get_value(user_data, Opts),
     case MsgName of
-        response_header ->
-            v_msg_response_header(Msg, [MsgName], TrUserData);
-        request_header ->
-            v_msg_request_header(Msg, [MsgName], TrUserData);
-        auth_header ->
-            v_msg_auth_header(Msg, [MsgName], TrUserData);
-        basic ->
-            v_msg_basic(Msg, [MsgName], TrUserData);
-        token ->
-            v_msg_token(Msg, [MsgName], TrUserData);
-        affected_rows ->
-            v_msg_affected_rows(Msg, [MsgName], TrUserData);
-        flight_metadata ->
-            v_msg_flight_metadata(Msg, [MsgName], TrUserData);
-        _ ->
-            mk_type_error(not_a_known_message, Msg, [])
+        response_header -> v_msg_response_header(Msg, [MsgName], TrUserData);
+        request_header -> v_msg_request_header(Msg, [MsgName], TrUserData);
+        auth_header -> v_msg_auth_header(Msg, [MsgName], TrUserData);
+        basic -> v_msg_basic(Msg, [MsgName], TrUserData);
+        token -> v_msg_token(Msg, [MsgName], TrUserData);
+        affected_rows -> v_msg_affected_rows(Msg, [MsgName], TrUserData);
+        flight_metadata -> v_msg_flight_metadata(Msg, [MsgName], TrUserData);
+        _ -> mk_type_error(not_a_known_message, Msg, [])
     end.
 
--compile({nowarn_unused_function, v_msg_response_header/3}).
 
--dialyzer({nowarn_function, v_msg_response_header/3}).
-
+-compile({nowarn_unused_function,v_msg_response_header/3}).
+-dialyzer({nowarn_function,v_msg_response_header/3}).
 v_msg_response_header(#{} = M, Path, _) ->
-    lists:foreach(fun(OtherKey) -> mk_type_error({extraneous_key, OtherKey}, M, Path) end,
-                  maps:keys(M)),
+    lists:foreach(fun (OtherKey) -> mk_type_error({extraneous_key, OtherKey}, M, Path) end, maps:keys(M)),
     ok;
-v_msg_response_header(M, Path, _TrUserData) when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M), response_header}, M, Path);
-v_msg_response_header(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, response_header}, X, Path).
+v_msg_response_header(M, Path, _TrUserData) when is_map(M) -> mk_type_error({missing_fields, [] -- maps:keys(M), response_header}, M, Path);
+v_msg_response_header(X, Path, _TrUserData) -> mk_type_error({expected_msg, response_header}, X, Path).
 
--compile({nowarn_unused_function, v_msg_request_header/3}).
-
--dialyzer({nowarn_function, v_msg_request_header/3}).
-
+-compile({nowarn_unused_function,v_msg_request_header/3}).
+-dialyzer({nowarn_function,v_msg_request_header/3}).
 v_msg_request_header(#{} = M, Path, TrUserData) ->
     case M of
-        #{catalog := F1} ->
-            v_type_string(F1, [catalog | Path], TrUserData);
-        _ ->
-            ok
+        #{catalog := F1} -> v_type_string(F1, [catalog | Path], TrUserData);
+        _ -> ok
     end,
     case M of
-        #{schema := F2} ->
-            v_type_string(F2, [schema | Path], TrUserData);
-        _ ->
-            ok
+        #{schema := F2} -> v_type_string(F2, [schema | Path], TrUserData);
+        _ -> ok
     end,
     case M of
-        #{authorization := F3} ->
-            v_msg_auth_header(F3, [authorization | Path], TrUserData);
-        _ ->
-            ok
+        #{authorization := F3} -> v_msg_auth_header(F3, [authorization | Path], TrUserData);
+        _ -> ok
     end,
     case M of
-        #{dbname := F4} ->
-            v_type_string(F4, [dbname | Path], TrUserData);
-        _ ->
-            ok
+        #{dbname := F4} -> v_type_string(F4, [dbname | Path], TrUserData);
+        _ -> ok
     end,
-    lists:foreach(fun (catalog) ->
-                          ok;
-                      (schema) ->
-                          ok;
-                      (authorization) ->
-                          ok;
-                      (dbname) ->
-                          ok;
-                      (OtherKey) ->
-                          mk_type_error({extraneous_key, OtherKey}, M, Path)
+    lists:foreach(fun (catalog) -> ok;
+                      (schema) -> ok;
+                      (authorization) -> ok;
+                      (dbname) -> ok;
+                      (OtherKey) -> mk_type_error({extraneous_key, OtherKey}, M, Path)
                   end,
                   maps:keys(M)),
     ok;
-v_msg_request_header(M, Path, _TrUserData) when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M), request_header}, M, Path);
-v_msg_request_header(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, request_header}, X, Path).
+v_msg_request_header(M, Path, _TrUserData) when is_map(M) -> mk_type_error({missing_fields, [] -- maps:keys(M), request_header}, M, Path);
+v_msg_request_header(X, Path, _TrUserData) -> mk_type_error({expected_msg, request_header}, X, Path).
 
--compile({nowarn_unused_function, v_msg_auth_header/3}).
-
--dialyzer({nowarn_function, v_msg_auth_header/3}).
-
+-compile({nowarn_unused_function,v_msg_auth_header/3}).
+-dialyzer({nowarn_function,v_msg_auth_header/3}).
 v_msg_auth_header(#{} = M, Path, TrUserData) ->
     case M of
-        #{auth_scheme := {basic, OF1}} ->
-            v_msg_basic(OF1, [basic, auth_scheme | Path], TrUserData);
-        #{auth_scheme := {token, OF1}} ->
-            v_msg_token(OF1, [token, auth_scheme | Path], TrUserData);
-        #{auth_scheme := F1} ->
-            mk_type_error(invalid_oneof, F1, [auth_scheme | Path]);
-        _ ->
-            ok
+        #{auth_scheme := {basic, OF1}} -> v_msg_basic(OF1, [basic, auth_scheme | Path], TrUserData);
+        #{auth_scheme := {token, OF1}} -> v_msg_token(OF1, [token, auth_scheme | Path], TrUserData);
+        #{auth_scheme := F1} -> mk_type_error(invalid_oneof, F1, [auth_scheme | Path]);
+        _ -> ok
     end,
-    lists:foreach(fun (auth_scheme) ->
-                          ok;
-                      (OtherKey) ->
-                          mk_type_error({extraneous_key, OtherKey}, M, Path)
+    lists:foreach(fun (auth_scheme) -> ok;
+                      (OtherKey) -> mk_type_error({extraneous_key, OtherKey}, M, Path)
                   end,
                   maps:keys(M)),
     ok;
-v_msg_auth_header(M, Path, _TrUserData) when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M), auth_header}, M, Path);
-v_msg_auth_header(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, auth_header}, X, Path).
+v_msg_auth_header(M, Path, _TrUserData) when is_map(M) -> mk_type_error({missing_fields, [] -- maps:keys(M), auth_header}, M, Path);
+v_msg_auth_header(X, Path, _TrUserData) -> mk_type_error({expected_msg, auth_header}, X, Path).
 
--compile({nowarn_unused_function, v_msg_basic/3}).
-
--dialyzer({nowarn_function, v_msg_basic/3}).
-
+-compile({nowarn_unused_function,v_msg_basic/3}).
+-dialyzer({nowarn_function,v_msg_basic/3}).
 v_msg_basic(#{} = M, Path, TrUserData) ->
     case M of
-        #{username := F1} ->
-            v_type_string(F1, [username | Path], TrUserData);
-        _ ->
-            ok
+        #{username := F1} -> v_type_string(F1, [username | Path], TrUserData);
+        _ -> ok
     end,
     case M of
-        #{password := F2} ->
-            v_type_string(F2, [password | Path], TrUserData);
-        _ ->
-            ok
+        #{password := F2} -> v_type_string(F2, [password | Path], TrUserData);
+        _ -> ok
     end,
-    lists:foreach(fun (username) ->
-                          ok;
-                      (password) ->
-                          ok;
-                      (OtherKey) ->
-                          mk_type_error({extraneous_key, OtherKey}, M, Path)
+    lists:foreach(fun (username) -> ok;
+                      (password) -> ok;
+                      (OtherKey) -> mk_type_error({extraneous_key, OtherKey}, M, Path)
                   end,
                   maps:keys(M)),
     ok;
-v_msg_basic(M, Path, _TrUserData) when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M), basic}, M, Path);
-v_msg_basic(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, basic}, X, Path).
+v_msg_basic(M, Path, _TrUserData) when is_map(M) -> mk_type_error({missing_fields, [] -- maps:keys(M), basic}, M, Path);
+v_msg_basic(X, Path, _TrUserData) -> mk_type_error({expected_msg, basic}, X, Path).
 
--compile({nowarn_unused_function, v_msg_token/3}).
-
--dialyzer({nowarn_function, v_msg_token/3}).
-
+-compile({nowarn_unused_function,v_msg_token/3}).
+-dialyzer({nowarn_function,v_msg_token/3}).
 v_msg_token(#{} = M, Path, TrUserData) ->
     case M of
-        #{token := F1} ->
-            v_type_string(F1, [token | Path], TrUserData);
-        _ ->
-            ok
+        #{token := F1} -> v_type_string(F1, [token | Path], TrUserData);
+        _ -> ok
     end,
-    lists:foreach(fun (token) ->
-                          ok;
-                      (OtherKey) ->
-                          mk_type_error({extraneous_key, OtherKey}, M, Path)
+    lists:foreach(fun (token) -> ok;
+                      (OtherKey) -> mk_type_error({extraneous_key, OtherKey}, M, Path)
                   end,
                   maps:keys(M)),
     ok;
-v_msg_token(M, Path, _TrUserData) when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M), token}, M, Path);
-v_msg_token(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, token}, X, Path).
+v_msg_token(M, Path, _TrUserData) when is_map(M) -> mk_type_error({missing_fields, [] -- maps:keys(M), token}, M, Path);
+v_msg_token(X, Path, _TrUserData) -> mk_type_error({expected_msg, token}, X, Path).
 
--compile({nowarn_unused_function, v_msg_affected_rows/3}).
-
--dialyzer({nowarn_function, v_msg_affected_rows/3}).
-
+-compile({nowarn_unused_function,v_msg_affected_rows/3}).
+-dialyzer({nowarn_function,v_msg_affected_rows/3}).
 v_msg_affected_rows(#{} = M, Path, TrUserData) ->
     case M of
-        #{value := F1} ->
-            v_type_uint32(F1, [value | Path], TrUserData);
-        _ ->
-            ok
+        #{value := F1} -> v_type_uint32(F1, [value | Path], TrUserData);
+        _ -> ok
     end,
-    lists:foreach(fun (value) ->
-                          ok;
-                      (OtherKey) ->
-                          mk_type_error({extraneous_key, OtherKey}, M, Path)
+    lists:foreach(fun (value) -> ok;
+                      (OtherKey) -> mk_type_error({extraneous_key, OtherKey}, M, Path)
                   end,
                   maps:keys(M)),
     ok;
-v_msg_affected_rows(M, Path, _TrUserData) when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M), affected_rows}, M, Path);
-v_msg_affected_rows(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, affected_rows}, X, Path).
+v_msg_affected_rows(M, Path, _TrUserData) when is_map(M) -> mk_type_error({missing_fields, [] -- maps:keys(M), affected_rows}, M, Path);
+v_msg_affected_rows(X, Path, _TrUserData) -> mk_type_error({expected_msg, affected_rows}, X, Path).
 
--compile({nowarn_unused_function, v_msg_flight_metadata/3}).
-
--dialyzer({nowarn_function, v_msg_flight_metadata/3}).
-
+-compile({nowarn_unused_function,v_msg_flight_metadata/3}).
+-dialyzer({nowarn_function,v_msg_flight_metadata/3}).
 v_msg_flight_metadata(#{} = M, Path, TrUserData) ->
     case M of
-        #{affected_rows := F1} ->
-            v_msg_affected_rows(F1, [affected_rows | Path], TrUserData);
-        _ ->
-            ok
+        #{affected_rows := F1} -> v_msg_affected_rows(F1, [affected_rows | Path], TrUserData);
+        _ -> ok
     end,
-    lists:foreach(fun (affected_rows) ->
-                          ok;
-                      (OtherKey) ->
-                          mk_type_error({extraneous_key, OtherKey}, M, Path)
+    lists:foreach(fun (affected_rows) -> ok;
+                      (OtherKey) -> mk_type_error({extraneous_key, OtherKey}, M, Path)
                   end,
                   maps:keys(M)),
     ok;
-v_msg_flight_metadata(M, Path, _TrUserData) when is_map(M) ->
-    mk_type_error({missing_fields, [] -- maps:keys(M), flight_metadata}, M, Path);
-v_msg_flight_metadata(X, Path, _TrUserData) ->
-    mk_type_error({expected_msg, flight_metadata}, X, Path).
+v_msg_flight_metadata(M, Path, _TrUserData) when is_map(M) -> mk_type_error({missing_fields, [] -- maps:keys(M), flight_metadata}, M, Path);
+v_msg_flight_metadata(X, Path, _TrUserData) -> mk_type_error({expected_msg, flight_metadata}, X, Path).
 
--compile({nowarn_unused_function, v_type_uint32/3}).
+-compile({nowarn_unused_function,v_type_uint32/3}).
+-dialyzer({nowarn_function,v_type_uint32/3}).
+v_type_uint32(N, _Path, _TrUserData) when 0 =< N, N =< 4294967295 -> ok;
+v_type_uint32(N, Path, _TrUserData) when is_integer(N) -> mk_type_error({value_out_of_range, uint32, unsigned, 32}, N, Path);
+v_type_uint32(X, Path, _TrUserData) -> mk_type_error({bad_integer, uint32, unsigned, 32}, X, Path).
 
--dialyzer({nowarn_function, v_type_uint32/3}).
-
-v_type_uint32(N, _Path, _TrUserData) when 0 =< N, N =< 4294967295 ->
-    ok;
-v_type_uint32(N, Path, _TrUserData) when is_integer(N) ->
-    mk_type_error({value_out_of_range, uint32, unsigned, 32}, N, Path);
-v_type_uint32(X, Path, _TrUserData) ->
-    mk_type_error({bad_integer, uint32, unsigned, 32}, X, Path).
-
--compile({nowarn_unused_function, v_type_string/3}).
-
--dialyzer({nowarn_function, v_type_string/3}).
-
+-compile({nowarn_unused_function,v_type_string/3}).
+-dialyzer({nowarn_function,v_type_string/3}).
 v_type_string(S, Path, _TrUserData) when is_list(S); is_binary(S) ->
     try unicode:characters_to_binary(S) of
-        B when is_binary(B) ->
-            ok;
-        {error, _, _} ->
-            mk_type_error(bad_unicode_string, S, Path)
+        B when is_binary(B) -> ok;
+        {error, _, _} -> mk_type_error(bad_unicode_string, S, Path)
     catch
-        error:badarg ->
-            mk_type_error(bad_unicode_string, S, Path)
+        error:badarg -> mk_type_error(bad_unicode_string, S, Path)
     end;
-v_type_string(X, Path, _TrUserData) ->
-    mk_type_error(bad_unicode_string, X, Path).
+v_type_string(X, Path, _TrUserData) -> mk_type_error(bad_unicode_string, X, Path).
 
--compile({nowarn_unused_function, mk_type_error/3}).
-
+-compile({nowarn_unused_function,mk_type_error/3}).
 -spec mk_type_error(_, _, list()) -> no_return().
 mk_type_error(Error, ValueSeen, Path) ->
     Path2 = prettify_path(Path),
     erlang:error({gpb_type_error, {Error, [{value, ValueSeen}, {path, Path2}]}}).
 
--compile({nowarn_unused_function, prettify_path/1}).
 
--dialyzer({nowarn_function, prettify_path/1}).
+-compile({nowarn_unused_function,prettify_path/1}).
+-dialyzer({nowarn_function,prettify_path/1}).
+prettify_path([]) -> top_level;
+prettify_path(PathR) -> lists:append(lists:join(".", lists:map(fun atom_to_list/1, lists:reverse(PathR)))).
 
-prettify_path([]) ->
-    top_level;
-prettify_path(PathR) ->
-    lists:append(
-        lists:join(".", lists:map(fun atom_to_list/1, lists:reverse(PathR)))).
 
--compile({nowarn_unused_function, id/2}).
--compile({inline, id/2}).
+-compile({nowarn_unused_function,id/2}).
+-compile({inline,id/2}).
+id(X, _TrUserData) -> X.
 
-id(X, _TrUserData) ->
-    X.
+-compile({nowarn_unused_function,v_ok/3}).
+-compile({inline,v_ok/3}).
+v_ok(_Value, _Path, _TrUserData) -> ok.
 
--compile({nowarn_unused_function, v_ok/3}).
--compile({inline, v_ok/3}).
+-compile({nowarn_unused_function,m_overwrite/3}).
+-compile({inline,m_overwrite/3}).
+m_overwrite(_Prev, New, _TrUserData) -> New.
 
-v_ok(_Value, _Path, _TrUserData) ->
-    ok.
+-compile({nowarn_unused_function,cons/3}).
+-compile({inline,cons/3}).
+cons(Elem, Acc, _TrUserData) -> [Elem | Acc].
 
--compile({nowarn_unused_function, m_overwrite/3}).
--compile({inline, m_overwrite/3}).
+-compile({nowarn_unused_function,lists_reverse/2}).
+-compile({inline,lists_reverse/2}).
+'lists_reverse'(L, _TrUserData) -> lists:reverse(L).
+-compile({nowarn_unused_function,'erlang_++'/3}).
+-compile({inline,'erlang_++'/3}).
+'erlang_++'(A, B, _TrUserData) -> A ++ B.
 
-m_overwrite(_Prev, New, _TrUserData) ->
-    New.
-
--compile({nowarn_unused_function, cons/3}).
--compile({inline, cons/3}).
-
-cons(Elem, Acc, _TrUserData) ->
-    [Elem | Acc].
-
--compile({nowarn_unused_function, lists_reverse/2}).
--compile({inline, lists_reverse/2}).
-
-lists_reverse(L, _TrUserData) ->
-    lists:reverse(L).
-
--compile({nowarn_unused_function, 'erlang_++'/3}).
--compile({inline, 'erlang_++'/3}).
-
-'erlang_++'(A, B, _TrUserData) ->
-    A ++ B.
 
 get_msg_defs() ->
     [{{msg, response_header}, []},
      {{msg, request_header},
-      [#{name => catalog,
-         fnum => 1,
-         rnum => 2,
-         type => string,
-         occurrence => optional,
-         opts => []},
-       #{name => schema,
-         fnum => 2,
-         rnum => 3,
-         type => string,
-         occurrence => optional,
-         opts => []},
-       #{name => authorization,
-         fnum => 3,
-         rnum => 4,
-         type => {msg, auth_header},
-         occurrence => optional,
-         opts => []},
-       #{name => dbname,
-         fnum => 4,
-         rnum => 5,
-         type => string,
-         occurrence => optional,
-         opts => []}]},
+      [#{name => catalog, fnum => 1, rnum => 2, type => string, occurrence => optional, opts => []},
+       #{name => schema, fnum => 2, rnum => 3, type => string, occurrence => optional, opts => []},
+       #{name => authorization, fnum => 3, rnum => 4, type => {msg, auth_header}, occurrence => optional, opts => []},
+       #{name => dbname, fnum => 4, rnum => 5, type => string, occurrence => optional, opts => []}]},
      {{msg, auth_header},
-      [#{name => auth_scheme,
-         rnum => 2,
-         fields =>
-             [#{name => basic,
-                fnum => 1,
-                rnum => 2,
-                type => {msg, basic},
-                occurrence => optional,
-                opts => []},
-              #{name => token,
-                fnum => 2,
-                rnum => 2,
-                type => {msg, token},
-                occurrence => optional,
-                opts => []}],
+      [#{name => auth_scheme, rnum => 2, fields => [#{name => basic, fnum => 1, rnum => 2, type => {msg, basic}, occurrence => optional, opts => []}, #{name => token, fnum => 2, rnum => 2, type => {msg, token}, occurrence => optional, opts => []}],
          opts => []}]},
-     {{msg, basic},
-      [#{name => username,
-         fnum => 1,
-         rnum => 2,
-         type => string,
-         occurrence => optional,
-         opts => []},
-       #{name => password,
-         fnum => 2,
-         rnum => 3,
-         type => string,
-         occurrence => optional,
-         opts => []}]},
-     {{msg, token},
-      [#{name => token,
-         fnum => 1,
-         rnum => 2,
-         type => string,
-         occurrence => optional,
-         opts => []}]},
-     {{msg, affected_rows},
-      [#{name => value,
-         fnum => 1,
-         rnum => 2,
-         type => uint32,
-         occurrence => optional,
-         opts => []}]},
-     {{msg, flight_metadata},
-      [#{name => affected_rows,
-         fnum => 1,
-         rnum => 2,
-         type => {msg, affected_rows},
-         occurrence => optional,
-         opts => []}]}].
+     {{msg, basic}, [#{name => username, fnum => 1, rnum => 2, type => string, occurrence => optional, opts => []}, #{name => password, fnum => 2, rnum => 3, type => string, occurrence => optional, opts => []}]},
+     {{msg, token}, [#{name => token, fnum => 1, rnum => 2, type => string, occurrence => optional, opts => []}]},
+     {{msg, affected_rows}, [#{name => value, fnum => 1, rnum => 2, type => uint32, occurrence => optional, opts => []}]},
+     {{msg, flight_metadata}, [#{name => affected_rows, fnum => 1, rnum => 2, type => {msg, affected_rows}, occurrence => optional, opts => []}]}].
 
-get_msg_names() ->
-    [response_header,
-     request_header,
-     auth_header,
-     basic,
-     token,
-     affected_rows,
-     flight_metadata].
 
-get_group_names() ->
-    [].
+get_msg_names() -> [response_header, request_header, auth_header, basic, token, affected_rows, flight_metadata].
 
-get_msg_or_group_names() ->
-    [response_header,
-     request_header,
-     auth_header,
-     basic,
-     token,
-     affected_rows,
-     flight_metadata].
 
-get_enum_names() ->
-    [].
+get_group_names() -> [].
+
+
+get_msg_or_group_names() -> [response_header, request_header, auth_header, basic, token, affected_rows, flight_metadata].
+
+
+get_enum_names() -> [].
+
 
 fetch_msg_def(MsgName) ->
     case find_msg_def(MsgName) of
-        Fs when is_list(Fs) ->
-            Fs;
-        error ->
-            erlang:error({no_such_msg, MsgName})
+        Fs when is_list(Fs) -> Fs;
+        error -> erlang:error({no_such_msg, MsgName})
     end.
 
+
 -spec fetch_enum_def(_) -> no_return().
-fetch_enum_def(EnumName) ->
-    erlang:error({no_such_enum, EnumName}).
+fetch_enum_def(EnumName) -> erlang:error({no_such_enum, EnumName}).
 
-find_msg_def(response_header) ->
-    [];
+
+find_msg_def(response_header) -> [];
 find_msg_def(request_header) ->
-    [#{name => catalog,
-       fnum => 1,
-       rnum => 2,
-       type => string,
-       occurrence => optional,
-       opts => []},
-     #{name => schema,
-       fnum => 2,
-       rnum => 3,
-       type => string,
-       occurrence => optional,
-       opts => []},
-     #{name => authorization,
-       fnum => 3,
-       rnum => 4,
-       type => {msg, auth_header},
-       occurrence => optional,
-       opts => []},
-     #{name => dbname,
-       fnum => 4,
-       rnum => 5,
-       type => string,
-       occurrence => optional,
-       opts => []}];
+    [#{name => catalog, fnum => 1, rnum => 2, type => string, occurrence => optional, opts => []},
+     #{name => schema, fnum => 2, rnum => 3, type => string, occurrence => optional, opts => []},
+     #{name => authorization, fnum => 3, rnum => 4, type => {msg, auth_header}, occurrence => optional, opts => []},
+     #{name => dbname, fnum => 4, rnum => 5, type => string, occurrence => optional, opts => []}];
 find_msg_def(auth_header) ->
-    [#{name => auth_scheme,
-       rnum => 2,
-       fields =>
-           [#{name => basic,
-              fnum => 1,
-              rnum => 2,
-              type => {msg, basic},
-              occurrence => optional,
-              opts => []},
-            #{name => token,
-              fnum => 2,
-              rnum => 2,
-              type => {msg, token},
-              occurrence => optional,
-              opts => []}],
+    [#{name => auth_scheme, rnum => 2, fields => [#{name => basic, fnum => 1, rnum => 2, type => {msg, basic}, occurrence => optional, opts => []}, #{name => token, fnum => 2, rnum => 2, type => {msg, token}, occurrence => optional, opts => []}],
        opts => []}];
-find_msg_def(basic) ->
-    [#{name => username,
-       fnum => 1,
-       rnum => 2,
-       type => string,
-       occurrence => optional,
-       opts => []},
-     #{name => password,
-       fnum => 2,
-       rnum => 3,
-       type => string,
-       occurrence => optional,
-       opts => []}];
-find_msg_def(token) ->
-    [#{name => token,
-       fnum => 1,
-       rnum => 2,
-       type => string,
-       occurrence => optional,
-       opts => []}];
-find_msg_def(affected_rows) ->
-    [#{name => value,
-       fnum => 1,
-       rnum => 2,
-       type => uint32,
-       occurrence => optional,
-       opts => []}];
-find_msg_def(flight_metadata) ->
-    [#{name => affected_rows,
-       fnum => 1,
-       rnum => 2,
-       type => {msg, affected_rows},
-       occurrence => optional,
-       opts => []}];
-find_msg_def(_) ->
-    error.
+find_msg_def(basic) -> [#{name => username, fnum => 1, rnum => 2, type => string, occurrence => optional, opts => []}, #{name => password, fnum => 2, rnum => 3, type => string, occurrence => optional, opts => []}];
+find_msg_def(token) -> [#{name => token, fnum => 1, rnum => 2, type => string, occurrence => optional, opts => []}];
+find_msg_def(affected_rows) -> [#{name => value, fnum => 1, rnum => 2, type => uint32, occurrence => optional, opts => []}];
+find_msg_def(flight_metadata) -> [#{name => affected_rows, fnum => 1, rnum => 2, type => {msg, affected_rows}, occurrence => optional, opts => []}];
+find_msg_def(_) -> error.
 
-find_enum_def(_) ->
-    error.
+
+find_enum_def(_) -> error.
+
 
 -spec enum_symbol_by_value(_, _) -> no_return().
-enum_symbol_by_value(E, V) ->
-    erlang:error({no_enum_defs, E, V}).
+enum_symbol_by_value(E, V) -> erlang:error({no_enum_defs, E, V}).
+
 
 -spec enum_value_by_symbol(_, _) -> no_return().
-enum_value_by_symbol(E, V) ->
-    erlang:error({no_enum_defs, E, V}).
+enum_value_by_symbol(E, V) -> erlang:error({no_enum_defs, E, V}).
 
-get_service_names() ->
-    [].
 
-get_service_def(_) ->
-    error.
 
-get_rpc_names(_) ->
-    error.
+get_service_names() -> [].
 
-find_rpc_def(_, _) ->
-    error.
+
+get_service_def(_) -> error.
+
+
+get_rpc_names(_) -> error.
+
+
+find_rpc_def(_, _) -> error.
+
+
 
 -spec fetch_rpc_def(_, _) -> no_return().
-fetch_rpc_def(ServiceName, RpcName) ->
-    erlang:error({no_such_rpc, ServiceName, RpcName}).
+fetch_rpc_def(ServiceName, RpcName) -> erlang:error({no_such_rpc, ServiceName, RpcName}).
+
 
 %% Convert a a fully qualified (ie with package name) service name
 %% as a binary to a service name as an atom.
 -spec fqbin_to_service_name(_) -> no_return().
-fqbin_to_service_name(X) ->
-    error({gpb_error, {badservice, X}}).
+fqbin_to_service_name(X) -> error({gpb_error, {badservice, X}}).
+
 
 %% Convert a service name as an atom to a fully qualified
 %% (ie with package name) name as a binary.
 -spec service_name_to_fqbin(_) -> no_return().
-service_name_to_fqbin(X) ->
-    error({gpb_error, {badservice, X}}).
+service_name_to_fqbin(X) -> error({gpb_error, {badservice, X}}).
+
 
 %% Convert a a fully qualified (ie with package name) service name
 %% and an rpc name, both as binaries to a service name and an rpc
 %% name, as atoms.
 -spec fqbins_to_service_and_rpc_name(_, _) -> no_return().
-fqbins_to_service_and_rpc_name(S, R) ->
-    error({gpb_error, {badservice_or_rpc, {S, R}}}).
+fqbins_to_service_and_rpc_name(S, R) -> error({gpb_error, {badservice_or_rpc, {S, R}}}).
+
 
 %% Convert a service name and an rpc name, both as atoms,
 %% to a fully qualified (ie with package name) service name and
 %% an rpc name as binaries.
 -spec service_and_rpc_name_to_fqbins(_, _) -> no_return().
-service_and_rpc_name_to_fqbins(S, R) ->
-    error({gpb_error, {badservice_or_rpc, {S, R}}}).
+service_and_rpc_name_to_fqbins(S, R) -> error({gpb_error, {badservice_or_rpc, {S, R}}}).
 
-fqbin_to_msg_name(<<"greptime.v1.ResponseHeader">>) ->
-    response_header;
-fqbin_to_msg_name(<<"greptime.v1.RequestHeader">>) ->
-    request_header;
-fqbin_to_msg_name(<<"greptime.v1.AuthHeader">>) ->
-    auth_header;
-fqbin_to_msg_name(<<"greptime.v1.Basic">>) ->
-    basic;
-fqbin_to_msg_name(<<"greptime.v1.Token">>) ->
-    token;
-fqbin_to_msg_name(<<"greptime.v1.AffectedRows">>) ->
-    affected_rows;
-fqbin_to_msg_name(<<"greptime.v1.FlightMetadata">>) ->
-    flight_metadata;
-fqbin_to_msg_name(E) ->
-    error({gpb_error, {badmsg, E}}).
 
-msg_name_to_fqbin(response_header) ->
-    <<"greptime.v1.ResponseHeader">>;
-msg_name_to_fqbin(request_header) ->
-    <<"greptime.v1.RequestHeader">>;
-msg_name_to_fqbin(auth_header) ->
-    <<"greptime.v1.AuthHeader">>;
-msg_name_to_fqbin(basic) ->
-    <<"greptime.v1.Basic">>;
-msg_name_to_fqbin(token) ->
-    <<"greptime.v1.Token">>;
-msg_name_to_fqbin(affected_rows) ->
-    <<"greptime.v1.AffectedRows">>;
-msg_name_to_fqbin(flight_metadata) ->
-    <<"greptime.v1.FlightMetadata">>;
-msg_name_to_fqbin(E) ->
-    error({gpb_error, {badmsg, E}}).
+fqbin_to_msg_name(<<"greptime.v1.ResponseHeader">>) -> response_header;
+fqbin_to_msg_name(<<"greptime.v1.RequestHeader">>) -> request_header;
+fqbin_to_msg_name(<<"greptime.v1.AuthHeader">>) -> auth_header;
+fqbin_to_msg_name(<<"greptime.v1.Basic">>) -> basic;
+fqbin_to_msg_name(<<"greptime.v1.Token">>) -> token;
+fqbin_to_msg_name(<<"greptime.v1.AffectedRows">>) -> affected_rows;
+fqbin_to_msg_name(<<"greptime.v1.FlightMetadata">>) -> flight_metadata;
+fqbin_to_msg_name(E) -> error({gpb_error, {badmsg, E}}).
+
+
+msg_name_to_fqbin(response_header) -> <<"greptime.v1.ResponseHeader">>;
+msg_name_to_fqbin(request_header) -> <<"greptime.v1.RequestHeader">>;
+msg_name_to_fqbin(auth_header) -> <<"greptime.v1.AuthHeader">>;
+msg_name_to_fqbin(basic) -> <<"greptime.v1.Basic">>;
+msg_name_to_fqbin(token) -> <<"greptime.v1.Token">>;
+msg_name_to_fqbin(affected_rows) -> <<"greptime.v1.AffectedRows">>;
+msg_name_to_fqbin(flight_metadata) -> <<"greptime.v1.FlightMetadata">>;
+msg_name_to_fqbin(E) -> error({gpb_error, {badmsg, E}}).
+
 
 -spec fqbin_to_enum_name(_) -> no_return().
-fqbin_to_enum_name(E) ->
-    error({gpb_error, {badenum, E}}).
+fqbin_to_enum_name(E) -> error({gpb_error, {badenum, E}}).
+
 
 -spec enum_name_to_fqbin(_) -> no_return().
-enum_name_to_fqbin(E) ->
-    error({gpb_error, {badenum, E}}).
+enum_name_to_fqbin(E) -> error({gpb_error, {badenum, E}}).
 
-get_package_name() ->
-    'greptime.v1'.
+
+get_package_name() -> 'greptime.v1'.
+
 
 %% Whether or not the message names
 %% are prepended with package name or not.
-uses_packages() ->
-    true.
+uses_packages() -> true.
 
-source_basename() ->
-    "common.proto".
+
+source_basename() -> "common.proto".
+
 
 %% Retrieve all proto file names, also imported ones.
 %% The order is top-down. The first element is always the main
 %% source file. The files are returned with extension,
 %% see get_all_proto_names/0 for a version that returns
 %% the basenames sans extension
-get_all_source_basenames() ->
-    ["common.proto"].
+get_all_source_basenames() -> ["common.proto"].
+
 
 %% Retrieve all proto file names, also imported ones.
 %% The order is top-down. The first element is always the main
 %% source file. The files are returned sans .proto extension,
 %% to make it easier to use them with the various get_xyz_containment
 %% functions.
-get_all_proto_names() ->
-    ["common"].
+get_all_proto_names() -> ["common"].
 
-get_msg_containment("common") ->
-    [affected_rows,
-     auth_header,
-     basic,
-     flight_metadata,
-     request_header,
-     response_header,
-     token];
-get_msg_containment(P) ->
-    error({gpb_error, {badproto, P}}).
 
-get_pkg_containment("common") ->
-    'greptime.v1';
-get_pkg_containment(P) ->
-    error({gpb_error, {badproto, P}}).
+get_msg_containment("common") -> [affected_rows, auth_header, basic, flight_metadata, request_header, response_header, token];
+get_msg_containment(P) -> error({gpb_error, {badproto, P}}).
 
-get_service_containment("common") ->
-    [];
-get_service_containment(P) ->
-    error({gpb_error, {badproto, P}}).
 
-get_rpc_containment("common") ->
-    [];
-get_rpc_containment(P) ->
-    error({gpb_error, {badproto, P}}).
+get_pkg_containment("common") -> 'greptime.v1';
+get_pkg_containment(P) -> error({gpb_error, {badproto, P}}).
 
-get_enum_containment("common") ->
-    [];
-get_enum_containment(P) ->
-    error({gpb_error, {badproto, P}}).
 
-get_proto_by_msg_name_as_fqbin(<<"greptime.v1.FlightMetadata">>) ->
-    "common";
-get_proto_by_msg_name_as_fqbin(<<"greptime.v1.ResponseHeader">>) ->
-    "common";
-get_proto_by_msg_name_as_fqbin(<<"greptime.v1.RequestHeader">>) ->
-    "common";
-get_proto_by_msg_name_as_fqbin(<<"greptime.v1.AuthHeader">>) ->
-    "common";
-get_proto_by_msg_name_as_fqbin(<<"greptime.v1.Basic">>) ->
-    "common";
-get_proto_by_msg_name_as_fqbin(<<"greptime.v1.AffectedRows">>) ->
-    "common";
-get_proto_by_msg_name_as_fqbin(<<"greptime.v1.Token">>) ->
-    "common";
-get_proto_by_msg_name_as_fqbin(E) ->
-    error({gpb_error, {badmsg, E}}).
+get_service_containment("common") -> [];
+get_service_containment(P) -> error({gpb_error, {badproto, P}}).
+
+
+get_rpc_containment("common") -> [];
+get_rpc_containment(P) -> error({gpb_error, {badproto, P}}).
+
+
+get_enum_containment("common") -> [];
+get_enum_containment(P) -> error({gpb_error, {badproto, P}}).
+
+
+get_proto_by_msg_name_as_fqbin(<<"greptime.v1.FlightMetadata">>) -> "common";
+get_proto_by_msg_name_as_fqbin(<<"greptime.v1.ResponseHeader">>) -> "common";
+get_proto_by_msg_name_as_fqbin(<<"greptime.v1.RequestHeader">>) -> "common";
+get_proto_by_msg_name_as_fqbin(<<"greptime.v1.AuthHeader">>) -> "common";
+get_proto_by_msg_name_as_fqbin(<<"greptime.v1.Basic">>) -> "common";
+get_proto_by_msg_name_as_fqbin(<<"greptime.v1.AffectedRows">>) -> "common";
+get_proto_by_msg_name_as_fqbin(<<"greptime.v1.Token">>) -> "common";
+get_proto_by_msg_name_as_fqbin(E) -> error({gpb_error, {badmsg, E}}).
+
 
 -spec get_proto_by_service_name_as_fqbin(_) -> no_return().
-get_proto_by_service_name_as_fqbin(E) ->
-    error({gpb_error, {badservice, E}}).
+get_proto_by_service_name_as_fqbin(E) -> error({gpb_error, {badservice, E}}).
+
 
 -spec get_proto_by_enum_name_as_fqbin(_) -> no_return().
-get_proto_by_enum_name_as_fqbin(E) ->
-    error({gpb_error, {badenum, E}}).
+get_proto_by_enum_name_as_fqbin(E) -> error({gpb_error, {badenum, E}}).
 
-get_protos_by_pkg_name_as_fqbin(<<"greptime.v1">>) ->
-    ["common"];
-get_protos_by_pkg_name_as_fqbin(E) ->
-    error({gpb_error, {badpkg, E}}).
+
+get_protos_by_pkg_name_as_fqbin(<<"greptime.v1">>) -> ["common"];
+get_protos_by_pkg_name_as_fqbin(E) -> error({gpb_error, {badpkg, E}}).
+
+
 
 gpb_version_as_string() ->
     "4.19.7".
 
 gpb_version_as_list() ->
-    [4, 19, 7].
+    [4,19,7].
 
 gpb_version_source() ->
     "file".
