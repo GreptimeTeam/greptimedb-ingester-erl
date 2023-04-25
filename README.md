@@ -13,7 +13,7 @@ Start the application:
     application:ensure_all_started(greptimedb).
 ```
 
-Start the client
+Start the client:
 
 ```erlang
     Options =
@@ -42,6 +42,7 @@ Write data by rows:
                  <<"host">> => <<"serverB">>,
                  <<"region">> => <<"ningbo">>,
                  <<"to">> => <<"kafka">>},
+           timestamp => 1619775143098}],
 
     {ok, #{response := {affected_rows, #{value := 2}}}} =
         greptimedb:write(Client, Metric, Points).
@@ -61,4 +62,4 @@ Build
 Test
 -----
 
-   $ rebar3 do ct,eunit
+    $ rebar3 do ct,eunit
