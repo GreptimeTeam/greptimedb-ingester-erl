@@ -19,7 +19,7 @@ Start the client:
     Options =
       [{endpoints, [{http, "localhost", 4001}]},
        {pool, greptimedb_client_pool},
-       {pool_size, 8},
+       {pool_size, 5},
        {pool_type, random}].
     {ok, Client} = greptimedb:start_client(Options).
 ```
@@ -47,6 +47,18 @@ Write data by rows:
 
     {ok, #{response := {affected_rows, #{value := 2}}}} =
         greptimedb:write(Client, Metric, Points).
+```
+
+Streaming write:
+
+```erlang
+    Points1 = [ ... ],
+    Points2 = [ ... ],
+
+    {ok, Stream} = greptimedb:write_stream(Client),
+    greptimedb_stream:write(Stream, "Metric1", Points1),
+    greptimedb_stream:write(Stream, "Metric2", Points2),
+    {ok, _} = greptimedb_stream:finish(Stream).
 ```
 
 Stop the client:

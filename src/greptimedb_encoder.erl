@@ -16,7 +16,7 @@
 
 -export([insert_request/2]).
 
--define(TS_COLUMN, "greptime_timestamp").
+-define(TS_COLUMN, <<"greptime_timestamp">>).
 -define(DEFAULT_CATALOG, "greptime").
 -define(DEFAULT_SCHEMA, "public").
 

@@ -18,7 +18,7 @@
 
 -behavihour(ecpool_worker).
 
--export([rpc_call/2, ddl/0]).
+-export([rpc_call/2, stream/1, ddl/0]).
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 -export([connect/1]).
 
@@ -44,7 +44,10 @@ handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
             {reply, {ok, Resp}, State};
         Err ->
             {reply, Err, State}
-    end.
+    end;
+
+handle_call(channel, _From, #state{channel = Channel} = State) ->
+    {reply, {ok, Channel}, State}.
 
 start_link(Args) ->
     gen_server:start_link(?MODULE, Args, []).
@@ -65,6 +68,10 @@ terminate(Reason, #state{channel = Channel} = State) ->
 %%%===================================================================
 rpc_call(Pid, Request) ->
     gen_server:call(Pid, {handle, Request}).
+
+stream(Pid) ->
+    {ok, Channel} = gen_server:call(Pid, channel),
+    greptime_v_1_greptime_database_client:handle_requests(#{channel => Channel}).
 
 ddl() ->
     todo.

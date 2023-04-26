@@ -6,7 +6,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 all() ->
-    [t_send, t_collect_columns].
+    [t_write, t_write_stream, t_collect_columns].
 
 init_per_suite(Config) ->
     application:ensure_all_started(greptimedb),
@@ -14,6 +14,19 @@ init_per_suite(Config) ->
 
 end_per_suite(_Config) ->
     application:stop(greptimedb).
+
+points(N) ->
+    lists:map(fun(Num) ->
+                 #{fields => #{<<"temperature">> => 2},
+                   tags =>
+                       #{<<"from">> => <<"mqttx_4b963a8e">>,
+                         <<"host">> => <<"serverB">>,
+                         <<"qos">> => "1",
+                         <<"region">> => <<"ningbo">>,
+                         <<"to">> => <<"kafka">>},
+                   timestamp => 1619775143098 + Num}
+              end,
+              lists:seq(1, N)).
 
 t_collect_columns(_) ->
     Points =
@@ -37,7 +50,7 @@ t_collect_columns(_) ->
     ct:print("~w~n", [Columns]),
     ok.
 
-t_send(_) ->
+t_write(_) ->
     Metric = <<"temperatures">>,
     Points =
         [#{fields => #{<<"temperature">> => 1},
@@ -57,11 +70,31 @@ t_send(_) ->
            timestamp => 1619775143098}],
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
-         {pool, greptimedb_client_pool},
-         {pool_size, 8},
+         {pool, greptimedb_client_pool_1},
+         {pool_size, 5},
          {pool_type, random}],
 
     {ok, Client} = greptimedb:start_client(Options),
     {ok, #{response := {affected_rows, #{value := 2}}}} =
         greptimedb:write(Client, Metric, Points),
+    ok.
+
+t_write_stream(_) ->
+    Options =
+        [{endpoints, [{http, "localhost", 4001}]},
+         {pool, greptimedb_client_pool_3},
+         {pool_size, 8},
+         {pool_type, random}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    {ok, Stream} = greptimedb:write_stream(Client),
+
+    Metric = <<"temperatures_stream">>,
+    lists:foreach(fun(N) ->
+                     Points = points(N),
+                     ok = greptimedb_stream:write(Stream, Metric, Points)
+                  end,
+                  lists:seq(1, 10)),
+
+    {ok, #{response := {affected_rows, #{value := 55}}}} = greptimedb_stream:finish(Stream),
     ok.
