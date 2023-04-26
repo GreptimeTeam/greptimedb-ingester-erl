@@ -3,7 +3,7 @@ greptimedb-client-erl
 ![Tests](https://github.com/GreptimeTeam/greptimedb-client-erl/workflows/Erlang%20CI/badge.svg)
 [![Coverage Status](https://coveralls.io/repos/github/GreptimeTeam/greptimedb-client-erl/badge.svg?branch=main)](https://coveralls.io/github/GreptimeTeam/greptimedb-client-erl?branch=main)
 
-An Erlang client library for GreptimeDB
+An Erlang client library for [GreptimeDB](https://github.com/GreptimeTeam/greptimedb).
 
 > **_NOTE:_** GreptimeDB and this project is under heavy development. Do not use it in production at the moment.
 
