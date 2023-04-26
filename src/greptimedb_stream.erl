@@ -5,6 +5,7 @@
 write(Stream, Metric, Points) ->
     try
         Request = greptimedb_encoder:insert_request(Metric, Points),
+        logger:debug("[GreptimeDB] write request ~w~n", [Request]),
         grpcbox_client:send(Stream, Request)
     catch
         E:R:S ->

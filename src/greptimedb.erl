@@ -39,7 +39,7 @@ write(#{protocol := Protocol} = Client, Metric, Points) ->
         case Protocol of
             http ->
                 Request = greptimedb_encoder:insert_request(Metric, Points),
-                ct:print("~w~n", [Request]),
+                logger:debug("[GreptimeDB] write request ~w~n", [Request]),
                 rpc_call(Client, Request)
         end
     catch
