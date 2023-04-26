@@ -35,6 +35,7 @@ t_collect_columns(_) ->
                #{<<"from">> => <<"mqttx_4b963a8e">>,
                  <<"host">> => <<"serverA">>,
                  <<"qos">> => "0",
+                 <<"device">> => <<"NO.1">>,
                  <<"region">> => <<"hangzhou">>},
            timestamp => 1619775142098},
          #{fields => #{<<"temperature">> => 2},
@@ -46,8 +47,41 @@ t_collect_columns(_) ->
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],
     Metric = "Test",
-    Columns = greptimedb_encoder:insert_request(Metric, Points),
-    ct:print("~w~n", [Columns]),
+    Request = greptimedb_encoder:insert_request(Metric, Points),
+    case Request of
+        #{header := #{catalog := Catalog, schema := Schema},
+          request := {insert, #{columns := Columns}}} ->
+            ?assertEqual(Catalog, "greptime"),
+            ?assertEqual(Schema, "public"),
+            ?assertEqual(8, length(Columns)),
+
+            {value, TemperatureColumn} =
+                lists:search(fun(C) -> maps:get(column_name, C) == <<"temperature">> end, Columns),
+            ?assertEqual([1, 2], maps:get(f64_values, maps:get(values, TemperatureColumn))),
+
+            {value, QosColumn} =
+                lists:search(fun(C) -> maps:get(column_name, C) == <<"qos">> end, Columns),
+            ?assertEqual(["0", "1"], maps:get(string_values, maps:get(values, QosColumn))),
+
+            {value, ToColumn} =
+                lists:search(fun(C) -> maps:get(column_name, C) == <<"to">> end, Columns),
+            ?assertEqual([<<"kafka">>], maps:get(string_values, maps:get(values, ToColumn))),
+            ?assertEqual(<<0:7/integer, 1:1/integer>>, maps:get(null_mask, ToColumn)),
+
+            {value, DeviceColumn} =
+                lists:search(fun(C) -> maps:get(column_name, C) == <<"device">> end, Columns),
+            ?assertEqual([<<"NO.1">>], maps:get(string_values, maps:get(values, DeviceColumn))),
+            ?assertEqual(<<0:6/integer, 1:1/integer, 0:1/integer>>,
+                         maps:get(null_mask, DeviceColumn)),
+
+            {value, TimestampColumn} =
+                lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end,
+                             Columns),
+            ?assertEqual([1619775142098, 1619775143098],
+                         maps:get(ts_millisecond_values, maps:get(values, TimestampColumn)));
+        _ ->
+            ?assert(false)
+    end,
     ok.
 
 t_write(_) ->

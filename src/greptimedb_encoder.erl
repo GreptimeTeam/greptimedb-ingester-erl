@@ -139,7 +139,7 @@ merge_columns(Columns) ->
     EmptyColumns =
         maps:from_list(
             lists:map(fun(Name) -> {Name, empty_column()} end, Names)),
-    lists:foldl(fun merge_columns/2, EmptyColumns, Columns).
+    lists:foldr(fun merge_columns/2, EmptyColumns, Columns).
 
 ts_column(Ts) when is_map(Ts) ->
     maps:merge(#{column_name => ?TS_COLUMN, semantic_type => 'TIMESTAMP'}, Ts);
