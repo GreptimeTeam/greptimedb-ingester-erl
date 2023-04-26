@@ -14,7 +14,7 @@
 
 -module(greptimedb).
 
--export([start_client/1, stop_client/1, write/3, ddl/1]).
+-export([start_client/1, stop_client/1, write/3, write_stream/1, ddl/1]).
 
 -spec start_client(list()) ->
                       {ok, Client :: map()} |
@@ -39,12 +39,25 @@ write(#{protocol := Protocol} = Client, Metric, Points) ->
         case Protocol of
             http ->
                 Request = greptimedb_encoder:insert_request(Metric, Points),
+                ct:print("~w~n", [Request]),
                 rpc_call(Client, Request)
         end
     catch
         E:R:S ->
             logger:error("[GreptimeDB] write ~0p failed: ~0p ~0p ~0p ~p",
                          [Metric, Points, E, R, S]),
+            {error, R}
+    end.
+
+write_stream(#{protocol := Protocol} = Client) ->
+    try
+        case Protocol of
+            http ->
+                rpc_write_stream(Client)
+        end
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] create write stream failed: ~0p ~0p ~p", [E, R, S]),
             {error, R}
     end.
 
@@ -64,6 +77,16 @@ stop_client(#{pool := Pool, protocol := Protocol}) ->
 
 rpc_call(#{pool := Pool} = _Client, Request) ->
     Fun = fun(Worker) -> greptimedb_worker:rpc_call(Worker, Request) end,
+    try
+        ecpool:with_client(Pool, Fun)
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] grpc write fail: ~0p ~0p ~0p", [E, R, S]),
+            {error, {E, R}}
+    end.
+
+rpc_write_stream(#{pool := Pool} = _Client) ->
+    Fun = fun(Worker) -> greptimedb_worker:stream(Worker) end,
     try
         ecpool:with_client(Pool, Fun)
     catch
