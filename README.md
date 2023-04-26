@@ -56,8 +56,8 @@ Streaming write:
     Points2 = [ ... ],
 
     {ok, Stream} = greptimedb:write_stream(Client),
-    greptimedb_stream:write(Stream, "Metric1", Points),
-    greptimedb_stream:write(Stream, "Metric2", Points),
+    greptimedb_stream:write(Stream, "Metric1", Points1),
+    greptimedb_stream:write(Stream, "Metric2", Points2),
     {ok, _} = greptimedb_stream:finish(Stream).
 ```
 
