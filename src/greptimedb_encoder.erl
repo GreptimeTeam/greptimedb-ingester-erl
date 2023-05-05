@@ -17,10 +17,9 @@
 -export([insert_request/3]).
 
 -define(TS_COLUMN, <<"greptime_timestamp">>).
--define(DEFAULT_CATALOG, "greptime").
--define(DEFAULT_SCHEMA, "public").
+-define(DEFAULT_DBNAME, "greptime-public").
 
-insert_request(#{cli_opts := Options} = _Client, {Catalog, Schema, Table}, Points) ->
+insert_request(#{cli_opts := Options} = _Client, {DbName, Table}, Points) ->
     RowCount = length(Points),
     Columns =
         lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Points)),
@@ -28,10 +27,9 @@ insert_request(#{cli_opts := Options} = _Client, {Catalog, Schema, Table}, Point
     Header =
         case AuthHeader of
             {} ->
-                #{catalog => Catalog, schema => Schema};
+                #{dbname => DbName};
             Scheme ->
-                #{catalog => Catalog,
-                  schema => Schema,
+                #{dbname => DbName,
                   authorization => #{auth_scheme => Scheme}}
         end,
 
@@ -42,7 +40,7 @@ insert_request(#{cli_opts := Options} = _Client, {Catalog, Schema, Table}, Point
            row_count => RowCount}},
     #{header => Header, request => Request};
 insert_request(Client, Table, Points) ->
-    insert_request(Client, {?DEFAULT_CATALOG, ?DEFAULT_SCHEMA, Table}, Points).
+    insert_request(Client, {?DEFAULT_DBNAME, Table}, Points).
 
 %%%===================================================================
 %%% Internal functions

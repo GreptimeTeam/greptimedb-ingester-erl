@@ -93,6 +93,7 @@ A proper list contains:
 * `auth`:  authentication options,  `{auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}` for example.
 
 ### Write and datatypes
+The metric name can be a string or binary. If you want to set the database, the metric name can be set in the form of `{dbname, metric}`. The data will be written into `greptime-public` by default.
 
 Write each row by `greptimedb:write/3` function. Every row contains:
 

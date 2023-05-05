@@ -52,12 +52,10 @@ t_collect_columns(_) ->
     Request = greptimedb_encoder:insert_request(Client, Metric, Points),
     case Request of
         #{header :=
-              #{catalog := Catalog,
-                schema := Schema,
+              #{dbname := DbName,
                 authorization := Auth},
           request := {insert, #{columns := Columns}}} ->
-            ?assertEqual(Catalog, "greptime"),
-            ?assertEqual(Schema, "public"),
+            ?assertEqual(DbName, "greptime-public"),
             ?assertEqual(8, length(Columns)),
             ?assertEqual(Auth, #{auth_scheme => AuthInfo}),
 

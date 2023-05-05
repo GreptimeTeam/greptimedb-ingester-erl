@@ -37,13 +37,10 @@ start_client(Options0) ->
             {error, Reason}
     end.
 
-write(#{protocol := Protocol} = Client, Metric, Points) ->
+write(Client, Metric, Points) ->
     try
-        case Protocol of
-            http ->
-                Request = greptimedb_encoder:insert_request(Client, Metric, Points),
-                rpc_call(Client, Request)
-        end
+        Request = greptimedb_encoder:insert_request(Client, Metric, Points),
+        rpc_call(Client, Request)
     catch
         E:R:S ->
             logger:error("[GreptimeDB] write ~0p failed: ~0p ~0p ~0p ~p",
@@ -51,12 +48,9 @@ write(#{protocol := Protocol} = Client, Metric, Points) ->
             {error, R}
     end.
 
-write_stream(#{protocol := Protocol} = Client) ->
+write_stream(Client) ->
     try
-        case Protocol of
-            http ->
-                rpc_write_stream(Client)
-        end
+        rpc_write_stream(Client)
     catch
         E:R:S ->
             logger:error("[GreptimeDB] create write stream failed: ~0p ~0p ~p", [E, R, S]),
@@ -67,11 +61,8 @@ ddl(_Client) ->
     todo.
 
 -spec stop_client(Client :: map()) -> ok | term().
-stop_client(#{pool := Pool, protocol := Protocol}) ->
-    case Protocol of
-        http ->
-            ecpool:stop_sup_pool(Pool)
-    end.
+stop_client(#{pool := Pool}) ->
+    ecpool:stop_sup_pool(Pool).
 
 %%%===================================================================
 %%% Internal functions
