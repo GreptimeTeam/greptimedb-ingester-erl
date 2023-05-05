@@ -47,13 +47,19 @@ t_collect_columns(_) ->
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],
     Metric = "Test",
-    Request = greptimedb_encoder:insert_request(Metric, Points),
+    AuthInfo = {basic, #{username => "test", password => "test"}},
+    Client = #{cli_opts => [{auth, AuthInfo}]},
+    Request = greptimedb_encoder:insert_request(Client, Metric, Points),
     case Request of
-        #{header := #{catalog := Catalog, schema := Schema},
+        #{header :=
+              #{catalog := Catalog,
+                schema := Schema,
+                authorization := Auth},
           request := {insert, #{columns := Columns}}} ->
             ?assertEqual(Catalog, "greptime"),
             ?assertEqual(Schema, "public"),
             ?assertEqual(8, length(Columns)),
+            ?assertEqual(Auth, #{auth_scheme => AuthInfo}),
 
             {value, TemperatureColumn} =
                 lists:search(fun(C) -> maps:get(column_name, C) == <<"temperature">> end, Columns),
@@ -106,7 +112,8 @@ t_write(_) ->
         [{endpoints, [{http, "localhost", 4001}]},
          {pool, greptimedb_client_pool_1},
          {pool_size, 5},
-         {pool_type, random}],
+         {pool_type, random},
+         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
     {ok, #{response := {affected_rows, #{value := 2}}}} =
@@ -118,7 +125,8 @@ t_write_stream(_) ->
         [{endpoints, [{http, "localhost", 4001}]},
          {pool, greptimedb_client_pool_3},
          {pool_size, 8},
-         {pool_type, random}],
+         {pool_type, random},
+         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
     {ok, Stream} = greptimedb:write_stream(Client),

@@ -28,7 +28,7 @@ jobs:
         mkdir -p /tmp/greptimedb-download
         tar xzvf /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz -C /tmp/greptimedb-download
         rm -f /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
-        nohup /tmp/greptimedb-download/greptime standalone start > /tmp/greptimedb.log 2>&1 &
+        nohup /tmp/greptimedb-download/greptime standalone start --user-provider=static_user_provider:cmd:greptime_user=greptime_pwd > /tmp/greptimedb.log 2>&1 &
     - name: Compile
       run: rebar3 compile
     - name: Run tests

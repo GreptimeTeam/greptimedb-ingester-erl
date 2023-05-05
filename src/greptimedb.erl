@@ -24,7 +24,10 @@ start_client(Options0) ->
     Pool = proplists:get_value(pool, Options0),
     Options = lists:keydelete(protocol, 1, lists:keydelete(pool, 1, Options0)),
 
-    Client = #{pool => Pool, protocol => http},
+    Client =
+        #{pool => Pool,
+          protocol => http,
+          cli_opts => Options},
     case ecpool:start_sup_pool(Pool, greptimedb_worker, Options) of
         {ok, _} ->
             {ok, Client};
@@ -38,7 +41,7 @@ write(#{protocol := Protocol} = Client, Metric, Points) ->
     try
         case Protocol of
             http ->
-                Request = greptimedb_encoder:insert_request(Metric, Points),
+                Request = greptimedb_encoder:insert_request(Client, Metric, Points),
                 rpc_call(Client, Request)
         end
     catch
@@ -84,8 +87,15 @@ rpc_call(#{pool := Pool} = _Client, Request) ->
             {error, {E, R}}
     end.
 
-rpc_write_stream(#{pool := Pool} = _Client) ->
-    Fun = fun(Worker) -> greptimedb_worker:stream(Worker) end,
+rpc_write_stream(#{pool := Pool, cli_opts := Options} = _Client) ->
+    Fun = fun(Worker) ->
+             case greptimedb_worker:stream(Worker) of
+                 {ok, S} ->
+                     {ok, S#{cli_opts => Options}};
+                 Other ->
+                     Other
+             end
+          end,
     try
         ecpool:with_client(Pool, Fun)
     catch
