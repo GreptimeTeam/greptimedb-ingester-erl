@@ -14,25 +14,35 @@
 
 -module(greptimedb_encoder).
 
--export([insert_request/2]).
+-export([insert_request/3]).
 
 -define(TS_COLUMN, <<"greptime_timestamp">>).
 -define(DEFAULT_CATALOG, "greptime").
 -define(DEFAULT_SCHEMA, "public").
 
-insert_request({Catalog, Schema, Table}, Points) ->
+insert_request(#{options := Options} = _Client, {Catalog, Schema, Table}, Points) ->
     RowCount = length(Points),
     Columns =
         lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Points)),
-    Header = #{catalog => Catalog, schema => Schema},
+    AuthHeader = proplists:get_value(auth, Options, {}),
+    Header =
+        case AuthHeader of
+            {} ->
+                #{catalog => Catalog, schema => Schema};
+            Scheme ->
+                #{catalog => Catalog,
+                  schema => Schema,
+                  authorization => #{auth_scheme => Scheme}}
+        end,
+
     Request =
         {insert,
          #{table_name => Table,
            columns => Columns,
            row_count => RowCount}},
     #{header => Header, request => Request};
-insert_request(Table, Points) ->
-    insert_request({?DEFAULT_CATALOG, ?DEFAULT_SCHEMA, Table}, Points).
+insert_request(Client, Table, Points) ->
+    insert_request(Client, {?DEFAULT_CATALOG, ?DEFAULT_SCHEMA, Table}, Points).
 
 %%%===================================================================
 %%% Internal functions

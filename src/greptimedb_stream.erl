@@ -4,7 +4,7 @@
 
 write(Stream, Metric, Points) ->
     try
-        Request = greptimedb_encoder:insert_request(Metric, Points),
+        Request = greptimedb_encoder:insert_request(Stream, Metric, Points),
         grpcbox_client:send(Stream, Request)
     catch
         E:R:S ->
