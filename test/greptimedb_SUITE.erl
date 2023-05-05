@@ -48,7 +48,7 @@ t_collect_columns(_) ->
            timestamp => 1619775143098}],
     Metric = "Test",
     AuthInfo = {basic, #{username => "test", password => "test"}},
-    Client = #{options => [{auth, AuthInfo}]},
+    Client = #{cli_opts => [{auth, AuthInfo}]},
     Request = greptimedb_encoder:insert_request(Client, Metric, Points),
     case Request of
         #{header :=

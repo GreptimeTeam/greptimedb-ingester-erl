@@ -27,7 +27,7 @@ start_client(Options0) ->
     Client =
         #{pool => Pool,
           protocol => http,
-          options => Options},
+          cli_opts => Options},
     case ecpool:start_sup_pool(Pool, greptimedb_worker, Options) of
         {ok, _} ->
             {ok, Client};
@@ -87,11 +87,11 @@ rpc_call(#{pool := Pool} = _Client, Request) ->
             {error, {E, R}}
     end.
 
-rpc_write_stream(#{pool := Pool, options := Options} = _Client) ->
+rpc_write_stream(#{pool := Pool, cli_opts := Options} = _Client) ->
     Fun = fun(Worker) ->
              case greptimedb_worker:stream(Worker) of
                  {ok, S} ->
-                     {ok, S#{options => Options}};
+                     {ok, S#{cli_opts => Options}};
                  Other ->
                      Other
              end

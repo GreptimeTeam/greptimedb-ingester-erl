@@ -20,7 +20,7 @@
 -define(DEFAULT_CATALOG, "greptime").
 -define(DEFAULT_SCHEMA, "public").
 
-insert_request(#{options := Options} = _Client, {Catalog, Schema, Table}, Points) ->
+insert_request(#{cli_opts := Options} = _Client, {Catalog, Schema, Table}, Points) ->
     RowCount = length(Points),
     Columns =
         lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Points)),
