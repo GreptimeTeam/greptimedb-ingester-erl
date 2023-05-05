@@ -69,15 +69,28 @@ Stop the client:
     greptimedb:stop_client(Client).
 ```
 
+Connect GreptimeDB with authentication:
+
+```erlang
+    Options =
+      [{endpoints, [{http, "localhost", 4001}]},
+       {pool, greptimedb_client_pool},
+       {pool_size, 5},
+       {pool_type, random},
+       {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}].
+    {ok, Client} = greptimedb:start_client(Options).
+```
+
 ## APIs guide
 
 ### Client options
 
 A proper list contains:
 
-* `endpoints`: GreptimeDB server address in the form of `{http, host, port}`
+* `endpoints`: List of the GreptimeDB server address in the form of `{http, host, port}`
 * `pool`, `pool_size` etc.: the client pool settings
 * `gprc_options`: grpxbox [client options](https://github.com/tsloughter/grpcbox#defining-channels)
+* `auth`:  authentication options,  `{auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}` for example.
 
 ### Write and datatypes
 
