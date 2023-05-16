@@ -46,7 +46,7 @@ handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
             {reply, Err, State}
     end;
 handle_call(health_check, _From, #state{channel = Channel} = State) ->
-    Request = health_pb:health_check_request(),
+    Request = #{},
     Reply = greptime_v_1_health_check_client:health_check(Request, #{channel => Channel}),
     case Reply of
         {ok, Resp, _} ->
