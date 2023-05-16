@@ -18,7 +18,7 @@
 
 -behavihour(ecpool_worker).
 
--export([rpc_call/2, stream/1, ddl/0]).
+-export([handle/2, stream/1, ddl/0, health_check/1]).
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 -export([connect/1]).
 
@@ -45,7 +45,15 @@ handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
         Err ->
             {reply, Err, State}
     end;
-
+handle_call(health_check, _From, #state{channel = Channel} = State) ->
+    Request = #{},
+    Reply = greptime_v_1_health_check_client:health_check(Request, #{channel => Channel}),
+    case Reply of
+        {ok, Resp, _} ->
+            {reply, {ok, Resp}, State};
+        Err ->
+            {reply, Err, State}
+    end;
 handle_call(channel, _From, #state{channel = Channel} = State) ->
     {reply, {ok, Channel}, State}.
 
@@ -66,8 +74,11 @@ terminate(Reason, #state{channel = Channel} = State) ->
 %%%===================================================================
 %%% Public functions
 %%%===================================================================
-rpc_call(Pid, Request) ->
+handle(Pid, Request) ->
     gen_server:call(Pid, {handle, Request}).
+
+health_check(Pid) ->
+    gen_server:call(Pid, health_check).
 
 stream(Pid) ->
     {ok, Channel} = gen_server:call(Pid, channel),

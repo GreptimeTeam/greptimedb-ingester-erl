@@ -114,6 +114,7 @@ t_write(_) ->
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
     {ok, #{response := {affected_rows, #{value := 2}}}} =
         greptimedb:write(Client, Metric, Points),
     ok.
@@ -127,6 +128,7 @@ t_write_stream(_) ->
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
     {ok, Stream} = greptimedb:write_stream(Client),
 
     Metric = <<"temperatures_stream">>,
