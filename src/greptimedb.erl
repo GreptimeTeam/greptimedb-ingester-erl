@@ -14,7 +14,8 @@
 
 -module(greptimedb).
 
--export([start_client/1, stop_client/1, write/3, write_stream/1, ddl/1]).
+-export([start_client/1, stop_client/1, write/3, write_stream/1, is_alive/1, is_alive/2,
+         ddl/1]).
 
 -spec start_client(list()) ->
                       {ok, Client :: map()} |
@@ -40,7 +41,7 @@ start_client(Options0) ->
 write(Client, Metric, Points) ->
     try
         Request = greptimedb_encoder:insert_request(Client, Metric, Points),
-        rpc_call(Client, Request)
+        handle(Client, Request)
     catch
         E:R:S ->
             logger:error("[GreptimeDB] write ~0p failed: ~0p ~0p ~0p ~p",
@@ -60,6 +61,23 @@ write_stream(Client) ->
 ddl(_Client) ->
     todo.
 
+is_alive(Client) ->
+    is_alive(Client, false).
+
+is_alive(Client, ReturnReason) ->
+    try
+        case health_check(Client) of
+            {ok, _Resp} ->
+                true;
+            Return ->
+                maybe_return_reason(Return, ReturnReason)
+        end
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] health check failed: ~0p ~0p ~p", [E, R, S]),
+            maybe_return_reason({error, R}, ReturnReason)
+    end.
+
 -spec stop_client(Client :: map()) -> ok | term().
 stop_client(#{pool := Pool}) ->
     ecpool:stop_sup_pool(Pool).
@@ -68,13 +86,23 @@ stop_client(#{pool := Pool}) ->
 %%% Internal functions
 %%%===================================================================
 
-rpc_call(#{pool := Pool} = _Client, Request) ->
-    Fun = fun(Worker) -> greptimedb_worker:rpc_call(Worker, Request) end,
+handle(#{pool := Pool} = _Client, Request) ->
+    Fun = fun(Worker) -> greptimedb_worker:handle(Worker, Request) end,
     try
         ecpool:with_client(Pool, Fun)
     catch
         E:R:S ->
             logger:error("[GreptimeDB] grpc write fail: ~0p ~0p ~0p", [E, R, S]),
+            {error, {E, R}}
+    end.
+
+health_check(#{pool := Pool} = _Client) ->
+    Fun = fun(Worker) -> greptimedb_worker:health_check(Worker) end,
+    try
+        ecpool:with_client(Pool, Fun)
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] grpc health check failed: ~0p ~0p ~0p", [E, R, S]),
             {error, {E, R}}
     end.
 
@@ -94,3 +122,8 @@ rpc_write_stream(#{pool := Pool, cli_opts := Options} = _Client) ->
             logger:error("[GreptimeDB] grpc write fail: ~0p ~0p ~0p", [E, R, S]),
             {error, {E, R}}
     end.
+
+maybe_return_reason({error, Reason}, true) ->
+    {false, Reason};
+maybe_return_reason(_, _) ->
+    false.
