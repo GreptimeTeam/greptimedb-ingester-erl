@@ -38,6 +38,16 @@ start_client(Options0) ->
             {error, Reason}
     end.
 
+-spec write(Client, Metric, Points) -> {ok, term()} | {error, term()}
+    when Client :: map(),
+         Metric :: Table | {DbName, Table},
+         DbName :: atom() | binary() | list(),
+         Table :: atom() | binary() | list(),
+         Points :: [Point],
+         Point ::
+             #{tags => map(),
+               fields => map(),
+               timestamp => integer()}.
 write(Client, Metric, Points) ->
     try
         Request = greptimedb_encoder:insert_request(Client, Metric, Points),
@@ -49,6 +59,7 @@ write(Client, Metric, Points) ->
             {error, R}
     end.
 
+-spec write_stream(Client) -> {ok, term()} | {error, term()} when Client :: map().
 write_stream(Client) ->
     try
         rpc_write_stream(Client)
@@ -61,9 +72,12 @@ write_stream(Client) ->
 ddl(_Client) ->
     todo.
 
+-spec is_alive(Client :: map()) -> true | false.
 is_alive(Client) ->
     is_alive(Client, false).
 
+-spec is_alive(Client :: map(), ReturnReason :: boolean()) ->
+                  true | false | {false, Reason :: term()}.
 is_alive(Client, ReturnReason) ->
     try
         case health_check(Client) of

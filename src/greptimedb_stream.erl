@@ -2,6 +2,16 @@
 
 -export([write/3, finish/1]).
 
+-spec write(Stream, Metric, Points) -> {ok, term()} | {error, term()}
+    when Stream :: map(),
+         Metric :: Table | {DbName, Table},
+         DbName :: atom() | binary() | list(),
+         Table :: atom() | binary() | list(),
+         Points :: [Point],
+         Point ::
+             #{tags => map(),
+               fields => map(),
+               timestamp => integer()}.
 write(Stream, Metric, Points) ->
     try
         Request = greptimedb_encoder:insert_request(Stream, Metric, Points),
@@ -13,9 +23,11 @@ write(Stream, Metric, Points) ->
             {error, R}
     end.
 
+-spec finish(Stream :: map()) -> {ok, term()} | {error, term()}.
 finish(Stream) ->
     finish(Stream, 5000).
 
+-spec finish(Stream :: map(), Timeout :: integer()) -> {ok, term()} | {error, term()}.
 finish(Stream, Timeout) ->
     try
         ok = grpcbox_client:close_send(Stream),
