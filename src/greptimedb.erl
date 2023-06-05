@@ -40,7 +40,8 @@ start_client(Options0) ->
 
 -spec write_batch(Client, MetricAndPoints) -> {ok, term()} | {error, term()}
     when Client :: map(),
-         MetricAndPoints :: [{Metric, Points}],
+         MetricAndPoints :: [MetricAndPoint],
+         MetricAndPoint :: {Metric, Points},
          Metric :: Table | {DbName, Table},
          DbName :: atom() | binary() | list(),
          Table :: atom() | binary() | list(),
