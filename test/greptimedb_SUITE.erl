@@ -6,7 +6,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 all() ->
-    [t_write, t_write_stream, t_collect_columns].
+    [t_write, t_write_stream, t_collect_columns, t_write_batch].
 
 init_per_suite(Config) ->
     application:ensure_all_started(greptimedb),
@@ -49,12 +49,10 @@ t_collect_columns(_) ->
     Metric = "Test",
     AuthInfo = {basic, #{username => "test", password => "test"}},
     Client = #{cli_opts => [{auth, AuthInfo}]},
-    Request = greptimedb_encoder:insert_request(Client, Metric, Points),
+    Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
     case Request of
-        #{header :=
-              #{dbname := DbName,
-                authorization := Auth},
-          request := {insert, #{columns := Columns}}} ->
+        #{header := #{dbname := DbName, authorization := Auth},
+          request := {inserts, #{inserts := [#{columns := Columns}]}}} ->
             ?assertEqual(DbName, "greptime-public"),
             ?assertEqual(8, length(Columns)),
             ?assertEqual(Auth, #{auth_scheme => AuthInfo}),
@@ -139,4 +137,27 @@ t_write_stream(_) ->
                   lists:seq(1, 10)),
 
     {ok, #{response := {affected_rows, #{value := 55}}}} = greptimedb_stream:finish(Stream),
+    ok.
+
+t_write_batch(_) ->
+    Options =
+        [{endpoints, [{http, "localhost", 4001}]},
+         {pool, greptimedb_client_pool_4},
+         {pool_size, 8},
+         {pool_type, random},
+         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+
+    Metric = <<"temperatures_">>,
+    MetricAndPoints =
+        lists:map(fun(N) ->
+                     Points = points(N),
+                     {erlang:iolist_to_binary([Metric, integer_to_binary(N)]), Points}
+                  end,
+                  lists:seq(1, 10)),
+
+    {ok, #{response := {affected_rows, #{value := 55}}}} =
+        greptimedb:write_batch(Client, MetricAndPoints),
     ok.

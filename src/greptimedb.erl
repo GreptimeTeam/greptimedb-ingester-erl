@@ -14,8 +14,8 @@
 
 -module(greptimedb).
 
--export([start_client/1, stop_client/1, write/3, write_stream/1, is_alive/1, is_alive/2,
-         ddl/1]).
+-export([start_client/1, stop_client/1, write_batch/2, write/3, write_stream/1,
+         is_alive/1, is_alive/2, ddl/1]).
 
 -spec start_client(list()) ->
                       {ok, Client :: map()} |
@@ -38,6 +38,28 @@ start_client(Options0) ->
             {error, Reason}
     end.
 
+-spec write_batch(Client, MetricAndPoints) -> {ok, term()} | {error, term()}
+    when Client :: map(),
+         MetricAndPoints :: [MetricAndPoint],
+         MetricAndPoint :: {Metric, Points},
+         Metric :: Table | {DbName, Table},
+         DbName :: atom() | binary() | list(),
+         Table :: atom() | binary() | list(),
+         Points :: [Point],
+         Point ::
+             #{tags => map(),
+               fields => map(),
+               timestamp => integer()}.
+write_batch(Client, MetricAndPoints) ->
+    try
+        Request = greptimedb_encoder:insert_requests(Client, MetricAndPoints),
+        handle(Client, Request)
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] write ~0p failed: ~0p ~0p ~p", [MetricAndPoints, E, R, S]),
+            {error, R}
+    end.
+
 -spec write(Client, Metric, Points) -> {ok, term()} | {error, term()}
     when Client :: map(),
          Metric :: Table | {DbName, Table},
@@ -49,15 +71,7 @@ start_client(Options0) ->
                fields => map(),
                timestamp => integer()}.
 write(Client, Metric, Points) ->
-    try
-        Request = greptimedb_encoder:insert_request(Client, Metric, Points),
-        handle(Client, Request)
-    catch
-        E:R:S ->
-            logger:error("[GreptimeDB] write ~0p failed: ~0p ~0p ~0p ~p",
-                         [Metric, Points, E, R, S]),
-            {error, R}
-    end.
+    write_batch(Client, [{Metric, Points}]).
 
 -spec write_stream(Client) -> {ok, term()} | {error, term()} when Client :: map().
 write_stream(Client) ->

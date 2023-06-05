@@ -14,33 +14,43 @@
 
 -module(greptimedb_encoder).
 
--export([insert_request/3]).
+-export([insert_requests/2]).
 
 -define(TS_COLUMN, <<"greptime_timestamp">>).
 -define(DEFAULT_DBNAME, "greptime-public").
 
-insert_request(#{cli_opts := Options} = _Client, {DbName, Table}, Points) ->
-    RowCount = length(Points),
-    Columns =
-        lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Points)),
+insert_requests(Client, TableAndPoints) ->
+    insert_requests(Client, TableAndPoints, unknown, []).
+
+insert_requests(#{cli_opts := Options} = _Client, [], DbName, Inserts) ->
     AuthHeader = proplists:get_value(auth, Options, {}),
     Header =
         case AuthHeader of
             {} ->
                 #{dbname => DbName};
             Scheme ->
-                #{dbname => DbName,
-                  authorization => #{auth_scheme => Scheme}}
+                #{dbname => DbName, authorization => #{auth_scheme => Scheme}}
         end,
+    #{header => Header, request => {inserts, #{inserts => Inserts}}};
+insert_requests(Client, [{Table, Points} | T], PrevDbName, Inserts) ->
+    {DbName, Insert} = insert_request(Table, Points),
+    case PrevDbName of
+        unknown ->
+            insert_requests(Client, T, DbName, [Insert | Inserts]);
+        Name when Name == DbName ->
+            insert_requests(Client, T, Name, [Insert | Inserts])
+    end.
 
-    Request =
-        {insert,
-         #{table_name => Table,
-           columns => Columns,
-           row_count => RowCount}},
-    #{header => Header, request => Request};
-insert_request(Client, Table, Points) ->
-    insert_request(Client, {?DEFAULT_DBNAME, Table}, Points).
+insert_request({DbName, Table}, Points) ->
+    RowCount = length(Points),
+    Columns =
+        lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Points)),
+    {DbName,
+     #{table_name => Table,
+       columns => Columns,
+       row_count => RowCount}};
+insert_request(Table, Points) ->
+    insert_request({?DEFAULT_DBNAME, Table}, Points).
 
 %%%===================================================================
 %%% Internal functions

@@ -6,6 +6,7 @@ greptimedb-client-erl
 An Erlang client library for [GreptimeDB](https://github.com/GreptimeTeam/greptimedb).
 
 > **_NOTE:_** GreptimeDB and this project is under heavy development. Do not use it in production at the moment.
+>  0.1.0: only working for GreptimeDB 0.2, otherwise for the latest GreptimeDB releases.
 
 ## Usage
 
@@ -49,6 +50,17 @@ Write data by rows:
 
     {ok, #{response := {affected_rows, #{value := 2}}}} =
         greptimedb:write(Client, Metric, Points).
+```
+
+Batch write:
+```erlang
+Metric1 = <<"temperatures">>,
+Points1 = [...],
+Metric2 = <<"humidities">>,
+Points2 = [...],
+Batch = [{Metric1, Points1}, {Metric2, Points}],
+
+{ok, _} = greptimedb:write_batch(Client, Batch).
 ```
 
 Streaming write:

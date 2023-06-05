@@ -1,3 +1,17 @@
+// Copyright 2023 Greptime Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 syntax = "proto3";
 
 package greptime.v1;
@@ -19,24 +33,28 @@ service GreptimeDatabase {
 message GreptimeRequest {
   RequestHeader header = 1;
   oneof request {
-    InsertRequest insert = 2;
+    InsertRequests inserts = 2;
     QueryRequest query = 3;
     DdlRequest ddl = 4;
+    DeleteRequest delete = 5;
   }
 }
 
 message GreptimeResponse {
   ResponseHeader header = 1;
-  oneof response {
-    AffectedRows affected_rows = 2;
-  }
+  oneof response { AffectedRows affected_rows = 2; }
 }
 
 message QueryRequest {
   oneof query {
     string sql = 1;
     bytes logical_plan = 2;
+    // PromRangeQuery prom_range_query = 3;
   }
+}
+
+message InsertRequests {
+  repeated InsertRequest inserts = 1;
 }
 
 message InsertRequest {
@@ -52,4 +70,19 @@ message InsertRequest {
 
   // The region number of current insert request.
   uint32 region_number = 5;
+}
+
+message DeleteRequest {
+  // The table name to delete from. Catalog name and schema name are in the
+  // `RequestHeader`.
+  string table_name = 1;
+
+  // The region number of current delete request.
+  uint32 region_number = 2;
+
+  // The data to delete, indexed by key columns.
+  repeated Column key_columns = 3;
+
+  // The row count of all columns above.
+  uint32 row_count = 4;
 }
