@@ -22,7 +22,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Setup greptimedb
       run: |
-        GREPTIMEDB_VER=v0.3.0-alpha
+        GREPTIMEDB_VER=v0.3.0
         DOWNLOAD_URL=https://github.com/GreptimeTeam/greptimedb
         curl -L ${DOWNLOAD_URL}/releases/download/${GREPTIMEDB_VER}/greptime-linux-amd64.tgz -o /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
         mkdir -p /tmp/greptimedb-download
