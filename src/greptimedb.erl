@@ -50,7 +50,7 @@ start_client(Options0) ->
                timestamp => integer()}.
 write(Client, Metric, Points) ->
     try
-        Request = greptimedb_encoder:insert_request(Client, Metric, Points),
+        Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
         handle(Client, Request)
     catch
         E:R:S ->

@@ -14,7 +14,7 @@
                timestamp => integer()}.
 write(Stream, Metric, Points) ->
     try
-        Request = greptimedb_encoder:insert_request(Stream, Metric, Points),
+        Request = greptimedb_encoder:insert_requests(Stream, [{Metric, Points}]),
         grpcbox_client:send(Stream, Request)
     catch
         E:R:S ->
