@@ -6,7 +6,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 all() ->
-    [t_write, t_write_stream, t_collect_columns, t_write_batch].
+    [t_write, t_write_stream, t_collect_columns, t_write_batch, t_bench_perf].
 
 init_per_suite(Config) ->
     application:ensure_all_started(greptimedb),
@@ -17,7 +17,7 @@ end_per_suite(_Config) ->
 
 points(N) ->
     lists:map(fun(Num) ->
-                 #{fields => #{<<"temperature">> => 2},
+                 #{fields => #{<<"temperature">> => Num},
                    tags =>
                        #{<<"from">> => <<"mqttx_4b963a8e">>,
                          <<"host">> => <<"serverB">>,
@@ -160,4 +160,79 @@ t_write_batch(_) ->
 
     {ok, #{response := {affected_rows, #{value := 55}}}} =
         greptimedb:write_batch(Client, MetricAndPoints),
+    ok.
+
+rand_string(Bytes) ->
+    base64:encode(
+        crypto:strong_rand_bytes(Bytes)).
+
+bench_points(StartTs, N) ->
+    lists:map(fun(Num) ->
+                 #{fields =>
+                       #{<<"f0">> => Num,
+                         <<"f1">> => Num,
+                         <<"f2">> => Num,
+                         <<"f3">> => Num,
+                         <<"f4">> => Num,
+                         <<"f5">> => rand:uniform(Num),
+                         <<"f6">> => rand:uniform(Num),
+                         <<"f7">> => rand:uniform(Num),
+                         <<"f8">> => rand:uniform(Num),
+                         <<"f9">> => rand:uniform(Num)},
+                   tags =>
+                       #{<<"tag0">> => <<"tagv0">>,
+                         <<"tag1">> => <<"tagv1">>,
+                         <<"tag2">> => <<"tagv2">>,
+                         <<"tag3">> => <<"tagv3">>,
+                         <<"tag4">> => <<"tagv4">>,
+                         <<"tag5">> => <<"tagv5">>,
+                         <<"tag6">> => <<"tagv6">>,
+                         <<"tag7">> => rand_string(8),
+                         <<"tag8">> => rand_string(8),
+                         <<"tag9">> => rand_string(8)},
+                   timestamp => StartTs + Num}
+              end,
+              lists:seq(1, N)).
+
+bench_write(0, _BatchSize, _Client, Written) ->
+    Written;
+bench_write(N, BatchSize, Client, Written) ->
+    Metric = <<"bench_metrics">>,
+    Points = bench_points(1687814974000 - N, BatchSize),
+    _Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
+
+    %%{ok, #{response := {affected_rows, #{value := Rows}}}} =
+    %%    greptimedb:write(Client, <<"bench_metrics">>, bench_points(1687814974000 - N, BatchSize)),
+
+    NewWritten = Written + length(Points),
+    bench_write(N - 1, BatchSize, Client, NewWritten).
+
+t_bench_perf(_) ->
+    Options =
+        [{endpoints, [{http, "localhost", 4001}]},
+         {pool, greptimedb_client_pool_bench},
+         {pool_size, 8},
+         {pool_type, random},
+         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+    BatchSize = 100,
+    Num = 1000,
+    %% warmup
+    bench_write(1000, BatchSize, Client, 0),
+    ct:print("Warmed up, start to benchmark writing..."),
+    %% benchmark
+    T1 = erlang:monotonic_time(),
+    eprof:start(),
+    eprof:log("/tmp/eprof.result"),
+    {ok, Rows} = eprof:profile(fun() -> bench_write(Num, BatchSize, Client, 0) end),
+    eprof:analyze(),
+    T2 = erlang:monotonic_time(),
+    Time = erlang:convert_time_unit(T2 - T1, native, seconds),
+    TPS = Rows / Time,
+    %% print the result
+    ct:print("Finish benchmark, cost: ~p seconds, rows: ~p, TPS: ~p~n",
+             [Time, Rows, TPS]),
+    eprof:stop(),
     ok.
