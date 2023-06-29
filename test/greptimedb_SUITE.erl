@@ -7,8 +7,9 @@
 
 all() ->
     [t_write, t_write_stream, t_collect_columns, t_write_batch, t_bench_perf].
-    %%[t_bench_perf].
-    %%[t_collect_columns, t_bench_perf].
+
+%%[t_bench_perf].
+%%[t_collect_columns, t_bench_perf].
 
 init_per_suite(Config) ->
     application:ensure_all_started(greptimedb),
@@ -118,7 +119,7 @@ t_write(_) ->
            timestamp => 1619775143098}],
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
-         {pool, greptimedb_client_pool_1},
+         {pool, greptimedb_client_pool},
          {pool_size, 5},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
@@ -127,12 +128,13 @@ t_write(_) ->
     true = greptimedb:is_alive(Client),
     {ok, #{response := {affected_rows, #{value := 2}}}} =
         greptimedb:write(Client, Metric, Points),
+    greptimedb:stop_client(Client),
     ok.
 
 t_write_stream(_) ->
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
-         {pool, greptimedb_client_pool_3},
+         {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
@@ -149,12 +151,13 @@ t_write_stream(_) ->
                   lists:seq(1, 10)),
 
     {ok, #{response := {affected_rows, #{value := 55}}}} = greptimedb_stream:finish(Stream),
+    greptimedb:stop_client(Client),
     ok.
 
 t_write_batch(_) ->
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
-         {pool, greptimedb_client_pool_4},
+         {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
@@ -172,6 +175,7 @@ t_write_batch(_) ->
 
     {ok, #{response := {affected_rows, #{value := 55}}}} =
         greptimedb:write_batch(Client, MetricAndPoints),
+    greptimedb:stop_client(Client),
     ok.
 
 rand_string(Bytes) ->
@@ -206,17 +210,17 @@ bench_points(StartTs, N) ->
               end,
               lists:seq(1, N)).
 
-bench_write(N, BatchSize, Client, BenchmarkEncoding) ->
-    bench_write(N, BatchSize, Client, BenchmarkEncoding, 0).
+bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding) ->
+    bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding, 0).
 
-bench_write(0, _BatchSize, _Client, _BenchmarkEncoding, Written) ->
+bench_write(0, _StartMs, _BatchSize, _Client, _BenchmarkEncoding, Written) ->
     Written;
-bench_write(N, BatchSize, Client, BenchmarkEncoding, Written) ->
+bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding, Written) ->
     Rows =
         case BenchmarkEncoding of
             true ->
                 Metric = <<"bench_metrics">>,
-                Points = bench_points(1687814974000 - N, BatchSize),
+                Points = bench_points(StartMs - N, BatchSize),
                 _Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
                 length(Points);
             false ->
@@ -228,12 +232,20 @@ bench_write(N, BatchSize, Client, BenchmarkEncoding, Written) ->
         end,
 
     NewWritten = Written + Rows,
-    bench_write(N - 1, BatchSize, Client, BenchmarkEncoding, NewWritten).
+    bench_write(N - 1, StartMs, BatchSize, Client, BenchmarkEncoding, NewWritten).
+
+join([P | Ps]) ->
+    receive
+        {P, Result} ->
+            [Result | join(Ps)]
+    end;
+join([]) ->
+    [].
 
 t_bench_perf(_) ->
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
-         {pool, greptimedb_client_pool_bench},
+         {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
@@ -244,8 +256,12 @@ t_bench_perf(_) ->
     Num = 1000,
     Profile = false,
     BenchmarkEncoding = false,
+    Concurrency = 3,
+    {MegaSecs, Secs, _MicroSecs} = erlang:timestamp(),
+    StartMs = (MegaSecs * 1000000 + Secs) * 1000,
+
     %% warmup
-    bench_write(1000, BatchSize, Client, BenchmarkEncoding),
+    bench_write(1000, StartMs, BatchSize, Client, BenchmarkEncoding),
     ct:print("Warmed up, start to benchmark writing..."),
     %% benchmark
     T1 = erlang:monotonic_time(),
@@ -256,17 +272,35 @@ t_bench_perf(_) ->
                 eprof:start(),
                 eprof:log("/tmp/eprof.result"),
                 {ok, Ret} =
-                    eprof:profile(fun() -> bench_write(Num, BatchSize, Client, BenchmarkEncoding)
+                    eprof:profile(fun() ->
+                                     bench_write(Num, StartMs, BatchSize, Client, BenchmarkEncoding)
                                   end),
                 eprof:analyze(),
                 eprof:stop(),
                 Ret;
             false ->
-                bench_write(Num, BatchSize, Client, BenchmarkEncoding)
+                Parent = self(),
+                Pids =
+                    lists:map(fun(C) ->
+                                 spawn(fun() ->
+                                          Written =
+                                              bench_write(Num,
+                                                          StartMs - C * Num * BatchSize,
+                                                          BatchSize,
+                                                          Client,
+                                                          BenchmarkEncoding),
+                                          Parent ! {self(), Written}
+                                       end)
+                              end,
+                              lists:seq(1, Concurrency)),
+                lists:sum(join(Pids))
         end,
+
     T2 = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(T2 - T1, native, seconds),
     TPS = Rows / Time,
     %% print the result
-    ct:print("Finish benchmark, cost: ~p seconds, rows: ~p, TPS: ~p~n", [Time, Rows, TPS]),
+    ct:print("Finish benchmark, concurrency: ~p, cost: ~p seconds, rows: ~p, TPS: ~p~n",
+             [Concurrency, Time, Rows, TPS]),
+    greptimedb:stop_client(Client),
     ok.
