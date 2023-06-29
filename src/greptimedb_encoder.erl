@@ -59,7 +59,7 @@ collect_columns(Points) ->
     collect_columns(Points, []).
 
 collect_columns([], Columns) ->
-    maps:values(merge_columns(Columns));
+    merge_columns(Columns);
 collect_columns([Point | T], Columns) ->
     collect_columns(T, [convert_columns(Point) | Columns]).
 
@@ -95,8 +95,49 @@ values_size(#{ts_second_values := Values}) ->
     length(Values);
 values_size(#{ts_millisecond_values := Values}) ->
     length(Values);
+values_size(#{ts_microsecond_values := Values}) ->
+    length(Values);
 values_size(#{ts_nanosecond_values := Values}) ->
     length(Values).
+
+merge_values(V1, V2) when map_size(V1) == 0 ->
+    V2;
+merge_values(#{i8_values := V1} = L, #{i8_values := V2}) ->
+    L#{i8_values := [V2 | V1]};
+merge_values(#{i16_values := V1} = L, #{i16_values := V2}) ->
+    L#{i16_values := [V2 | V1]};
+merge_values(#{i32_values := V1} = L, #{i32_values := V2}) ->
+    L#{i32_values := [V2 | V1]};
+merge_values(#{i64_values := V1} = L, #{i64_values := V2}) ->
+    L#{i64_values := [V2 | V1]};
+merge_values(#{u8_values := V1} = L, #{u8_values := V2}) ->
+    L#{u8_values := [V2 | V1]};
+merge_values(#{u16_values := V1} = L, #{u16_values := V2}) ->
+    L#{u16_values := [V2 | V1]};
+merge_values(#{u32_values := V1} = L, #{u32_values := V2}) ->
+    L#{u32_values := [V2 | V1]};
+merge_values(#{u64_values := V1} = L, #{u64_values := V2}) ->
+    L#{u64_values := [V2 | V1]};
+merge_values(#{f32_values := V1} = L, #{f32_values := V2}) ->
+    L#{f32_values := [V2 | V1]};
+merge_values(#{f64_values := V1} = L, #{f64_values := V2}) ->
+    L#{f64_values := [V2 | V1]};
+merge_values(#{bool_values := V1} = L, #{bool_values := V2}) ->
+    L#{bool_values := [V2 | V1]};
+merge_values(#{binary_values := V1} = L, #{binary_values := V2}) ->
+    L#{binary_values := [V2 | V1]};
+merge_values(#{string_values := V1} = L, #{string_values := V2}) ->
+    L#{string_values := [V2 | V1]};
+merge_values(#{date_values := V1} = L, #{date_values := V2}) ->
+    L#{date_values := [V2 | V1]};
+merge_values(#{ts_second_values := V1} = L, #{ts_second_values := V2}) ->
+    L#{ts_second_values := [V2 | V1]};
+merge_values(#{ts_millisecond_values := V1} = L, #{ts_millisecond_values := V2}) ->
+    L#{ts_millisecond_values := [V2 | V1]};
+merge_values(#{ts_microsecond_values := V1} = L, #{ts_microsecond_values := V2}) ->
+    L#{ts_microsecond_values := [V2 | V1]};
+merge_values(#{ts_nanosecond_values := V1} = L, #{ts_nanosecond_values := V2}) ->
+    L#{ts_nanosecond_values := [V2 | V1]}.
 
 pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
     ValuesSize = values_size(Values),
@@ -105,7 +146,7 @@ pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
                maps:remove(null_mask, Column);
            true ->
                Pad = 8 - (bit_size(NullMask) - floor(bit_size(NullMask) / 8) * 8),
-               Column#{null_mask => <<0:Pad/integer, NullMask/bits>>}
+               Column#{null_mask := <<0:Pad/integer, NullMask/bits>>}
         end,
     NewColumn.
 
@@ -118,46 +159,52 @@ convert_columns(#{fields := Fields,
     maps:put(
         maps:get(column_name, TsColumn), TsColumn, maps:merge(FieldColumns, TagColumns)).
 
-merge_column(#{null_mask := NullMask} = Column, NewColumn) ->
-    Values = maps:get(values, Column, #{}),
-    NewValues = maps:get(values, NewColumn),
-    MergedValues =
-        maps:merge_with(fun(_K, V1, V2) -> lists:foldr(fun(X, XS) -> [X | XS] end, V2, V1) end,
-                        Values,
-                        NewValues),
-    NewColumn1 = maps:merge(Column, NewColumn),
-    NewColumn1#{values => MergedValues, null_mask => <<NullMask/bits, 1:1/integer>>}.
+merge_column(#{null_mask := NullMask} = Column, Name, NextColumns) ->
+    case NextColumns of
+        #{Name := NewColumn} ->
+            Values = maps:get(values, Column, #{}),
+            NewValues = maps:get(values, NewColumn),
+            MergedValues = merge_values(Values, NewValues),
+            case map_size(Column) of
+                1 ->
+                    NewColumn#{values := MergedValues, null_mask => <<NullMask/bits, 1:1/integer>>};
+                _ ->
+                    Column#{values := MergedValues, null_mask := <<NullMask/bits, 1:1/integer>>}
+            end;
+        _ ->
+            Column#{null_mask := <<NullMask/bits, 0:1/integer>>}
+    end.
 
 merge_columns(NextColumns, Columns) ->
-    maps:fold(fun(Name, #{null_mask := NullMask} = Column, AccColumns) ->
-                 MergedColumn =
-                     case maps:find(Name, NextColumns) of
-                         {ok, NewColumn} ->
-                             merge_column(Column, NewColumn);
-                         _ ->
-                             Column#{null_mask => <<NullMask/bits, 0:1/integer>>}
-                     end,
-                 AccColumns#{Name => MergedColumn}
-              end,
-              Columns,
+    lists:map(fun({Name, Column}) -> {Name, merge_column(Column, Name, NextColumns)} end,
               Columns).
 
-empty_column() ->
-    #{null_mask => <<>>}.
+flatten([H]) ->
+    [H];
+flatten([[H] | T]) ->
+    flatten(T, [H]).
+
+flatten([], Acc) ->
+    Acc;
+flatten([H], Acc) ->
+    [H | Acc];
+flatten([[H] | T], Acc) ->
+    flatten(T, [H | Acc]).
 
 merge_columns(Columns) ->
     Names =
         sets:to_list(
-            sets:union(
-                lists:map(fun(C) ->
-                             sets:from_list(
-                                 maps:keys(C))
-                          end,
-                          Columns))),
-    EmptyColumns =
-        maps:from_list(
-            lists:map(fun(Name) -> {Name, empty_column()} end, Names)),
-    lists:foldr(fun merge_columns/2, EmptyColumns, Columns).
+            sets:from_list(
+                lists:flatten(
+                    lists:map(fun(C) -> maps:keys(C) end, Columns)))),
+    EmptyColumns = lists:map(fun(Name) -> {Name, #{null_mask => <<>>}} end, Names),
+    lists:map(fun({_Name, Column}) ->
+                 maps:update_with(values,
+                                  fun(Values) -> maps:map(fun(_K, VS) -> flatten(VS) end, Values)
+                                  end,
+                                  Column)
+              end,
+              lists:foldl(fun merge_columns/2, EmptyColumns, lists:reverse(Columns))).
 
 ts_column(Ts) when is_map(Ts) ->
     maps:merge(#{column_name => ?TS_COLUMN, semantic_type => 'TIMESTAMP'}, Ts);
