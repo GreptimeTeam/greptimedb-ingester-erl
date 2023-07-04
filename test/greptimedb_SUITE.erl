@@ -6,10 +6,10 @@
 -include_lib("eunit/include/eunit.hrl").
 
 all() ->
-    [t_write, t_write_stream, t_collect_columns, t_write_batch, t_bench_perf].
+    [t_write, t_write_stream, t_insert_requests, t_write_batch, t_bench_perf].
 
 %%[t_bench_perf].
-%%[t_collect_columns, t_bench_perf].
+%%[t_insert_requests, t_bench_perf].
 
 init_per_suite(Config) ->
     application:ensure_all_started(greptimedb),
@@ -31,7 +31,7 @@ points(N) ->
               end,
               lists:seq(1, N)).
 
-t_collect_columns(_) ->
+t_insert_requests(_) ->
     Points =
         [#{fields => #{<<"temperature">> => 1},
            tags =>
@@ -60,7 +60,7 @@ t_collect_columns(_) ->
 
     Metric = "Test",
     AuthInfo = {basic, #{username => "test", password => "test"}},
-    Client = #{cli_opts => [{auth, AuthInfo}]},
+    Client = #{cli_opts => [{auth, AuthInfo}, {timeunit, second}]},
     Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
     case Request of
         #{header := #{dbname := DbName, authorization := Auth},
@@ -93,7 +93,7 @@ t_collect_columns(_) ->
                 lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end,
                              Columns),
             ?assertEqual([1619775142098, 1619775143098, 1619775144098],
-                         maps:get(ts_millisecond_values, maps:get(values, TimestampColumn)));
+                         maps:get(ts_second_values, maps:get(values, TimestampColumn)));
         _ ->
             ?assert(false)
     end,
@@ -248,6 +248,7 @@ t_bench_perf(_) ->
          {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
+         {timeunit, ms},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
