@@ -23,7 +23,8 @@ Start the client:
       [{endpoints, [{http, "localhost", 4001}]},
        {pool, greptimedb_client_pool},
        {pool_size, 5},
-       {pool_type, random}].
+       {pool_type, random},
+       {timeunit, ms}].
     {ok, Client} = greptimedb:start_client(Options).
 ```
 
@@ -89,6 +90,7 @@ Connect GreptimeDB with authentication:
        {pool, greptimedb_client_pool},
        {pool_size, 5},
        {pool_type, random},
+       {timeunit, ms},
        {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}].
     {ok, Client} = greptimedb:start_client(Options).
 ```
@@ -103,6 +105,11 @@ A proper list contains:
 * `pool`, `pool_size` etc.: the client pool settings
 * `gprc_options`: grpxbox [client options](https://github.com/tsloughter/grpcbox#defining-channels)
 * `auth`:  authentication options,  `{auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}` for example.
+* `timeunit`: Timestamp unit, supports:
+    * `ns` or `nanosecond`
+    * `us` or `microsecond`
+    * `ms` or `millisecond`
+    * `s` or `second`
 
 ### Write and datatypes
 The metric name can be a string or binary. If you want to set the database, the metric name can be set in the form of `{dbname, metric}`. The data will be written into `greptime-public` by default.

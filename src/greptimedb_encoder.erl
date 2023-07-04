@@ -32,8 +32,8 @@ insert_requests(#{cli_opts := Options} = _Client, [], DbName, Inserts) ->
                 #{dbname => DbName, authorization => #{auth_scheme => Scheme}}
         end,
     #{header => Header, request => {inserts, #{inserts => Inserts}}};
-insert_requests(Client, [{Table, Points} | T], PrevDbName, Inserts) ->
-    {DbName, Insert} = insert_request(Table, Points),
+insert_requests(#{cli_opts := Options} = Client, [{Table, Points} | T], PrevDbName, Inserts) ->
+    {DbName, Insert} = insert_request(Options, Table, Points),
     case PrevDbName of
         unknown ->
             insert_requests(Client, T, DbName, [Insert | Inserts]);
@@ -41,27 +41,28 @@ insert_requests(Client, [{Table, Points} | T], PrevDbName, Inserts) ->
             insert_requests(Client, T, Name, [Insert | Inserts])
     end.
 
-insert_request({DbName, Table}, Points) ->
+insert_request(Options, {DbName, Table}, Points) ->
+    Timeunit = proplists:get_value(timeunit, Options, ms),
     RowCount = length(Points),
     Columns =
-        lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Points)),
+        lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Timeunit, Points)),
     {DbName,
      #{table_name => Table,
        columns => Columns,
        row_count => RowCount}};
-insert_request(Table, Points) ->
-    insert_request({?DEFAULT_DBNAME, Table}, Points).
+insert_request(Options, Table, Points) ->
+    insert_request(Options, {?DEFAULT_DBNAME, Table}, Points).
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-collect_columns(Points) ->
-    collect_columns(Points, []).
+collect_columns(Timeunit, Points) ->
+    collect_columns(Timeunit, Points, []).
 
-collect_columns([], Columns) ->
+collect_columns(_Timeunit, [], Columns) ->
     merge_columns(Columns);
-collect_columns([Point | T], Columns) ->
-    collect_columns(T, [convert_columns(Point) | Columns]).
+collect_columns(Timeunit, [Point | T], Columns) ->
+    collect_columns(Timeunit, T, [convert_columns(Timeunit, Point) | Columns]).
 
 values_size(#{i8_values := Values}) ->
     length(Values);
@@ -150,10 +151,11 @@ pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
         end,
     NewColumn.
 
-convert_columns(#{fields := Fields,
+convert_columns(Timeunit,
+                #{fields := Fields,
                   tags := Tags,
                   timestamp := Ts}) ->
-    TsColumn = ts_column(Ts),
+    TsColumn = ts_column(Timeunit, Ts),
     FieldColumns = maps:map(fun(K, V) -> field_column(K, V) end, Fields),
     TagColumns = maps:map(fun(K, V) -> tag_column(K, V) end, Tags),
     maps:put(
@@ -206,13 +208,31 @@ merge_columns(Columns) ->
               end,
               lists:foldl(fun merge_columns/2, EmptyColumns, lists:reverse(Columns))).
 
-ts_column(Ts) when is_map(Ts) ->
+ts_column(_Timeunit, Ts) when is_map(Ts) ->
     maps:merge(#{column_name => ?TS_COLUMN, semantic_type => 'TIMESTAMP'}, Ts);
-ts_column(Ts) ->
-    #{column_name => ?TS_COLUMN,
-      semantic_type => 'TIMESTAMP',
-      values => #{ts_millisecond_values => [Ts]},
-      datatype => 'TIMESTAMP_MILLISECOND'}.
+ts_column(Timeunit, Ts) ->
+    TsValue = ts_value(Timeunit, Ts),
+    TsValue#{
+             column_name => ?TS_COLUMN,
+             semantic_type => 'TIMESTAMP' }.
+
+ts_value(ns, Ts) ->
+    greptimedb_values:timestamp_nanosecond_value(Ts);
+ts_value(nanosecond, Ts) ->
+    greptimedb_values:timestamp_nanosecond_value(Ts);
+ts_value(us, Ts) ->
+    greptimedb_values:timestamp_microsecond_value(Ts);
+ts_value(microsecond, Ts) ->
+    greptimedb_values:timestamp_microsecond_value(Ts);
+ts_value(ms, Ts) ->
+    greptimedb_values:timestamp_millisecond_value(Ts);
+ts_value(millisecond, Ts) ->
+    greptimedb_values:timestamp_millisecond_value(Ts);
+ts_value(s, Ts) ->
+    greptimedb_values:timestamp_second_value(Ts);
+ts_value(second, Ts) ->
+    greptimedb_values:timestamp_second_value(Ts).
+
 
 field_column(Name, V) when is_map(V) ->
     maps:merge(#{column_name => Name, semantic_type => 'FIELD'}, V);
