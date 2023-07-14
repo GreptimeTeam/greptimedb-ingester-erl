@@ -18,6 +18,8 @@
 
 -behavihour(ecpool_worker).
 
+-include_lib("grpcbox/include/grpcbox.hrl").
+
 -export([handle/2, stream/1, ddl/0, health_check/1]).
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 -export([connect/1]).
@@ -42,6 +44,8 @@ handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
     case Reply of
         {ok, Resp, _} ->
             {reply, {ok, Resp}, State};
+        {error, {?GRPC_STATUS_UNAUTHENTICATED, Msg}, Other} ->
+            {reply, {error, {unauth, Msg, Other}}, State};
         Err ->
             {reply, Err, State}
     end;
