@@ -8,6 +8,5 @@
 -module(greptime_v_1_health_check_bhvr).
 
 %% Unary RPC
--callback health_check(ctx:t(), health_pb:health_check_request()) ->
-    {ok, health_pb:health_check_response(), ctx:t()} | grpcbox_stream:grpc_error_response().
-
+-callback health_check(ctx:t(), greptimedb_health_pb:health_check_request()) ->
+    {ok, greptimedb_health_pb:health_check_response(), ctx:t()} | grpcbox_stream:grpc_error_response().
