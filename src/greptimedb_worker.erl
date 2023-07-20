@@ -26,8 +26,10 @@
 
 -record(state, {channel}).
 
--define(TIMEOUT_MS, 12_000).
--define(RPC_TIMEOUT_SEC, 10).
+-define(CALL_TIMEOUT, 12_000).
+-define(HEALTH_CHECK_TIMEOUT, 1_000).
+-define(REQUEST_TIMEOUT, 10_000).
+-define(CONNECT_TIMEOUT, 5_000).
 
 %% ===================================================================
 %% gen_server callbacks
@@ -35,7 +37,7 @@
 init(Args) ->
     logger:debug("[GreptimeDB] genserver has started (~w)~n", [self()]),
     Endpoints = proplists:get_value(endpoints, Args),
-    Options = proplists:get_value(gprc_options, Args, #{}),
+    Options = proplists:get_value(gprc_options, Args, #{connect_timeout => ?CONNECT_TIMEOUT}),
     Channels =
         lists:map(fun({Schema, Host, Port}) -> {Schema, Host, Port, []} end, Endpoints),
     Channel = list_to_atom(pid_to_list(self())),
@@ -43,7 +45,7 @@ init(Args) ->
     {ok, #state{channel = Channel}}.
 
 handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
-    Ctx = ctx:with_deadline_after(?RPC_TIMEOUT_SEC, seconds),
+    Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
     Reply = greptime_v_1_greptime_database_client:handle(Ctx, Request, #{channel => Channel}),
     case Reply of
         {ok, Resp, _} ->
@@ -55,7 +57,7 @@ handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
     end;
 handle_call(health_check, _From, #state{channel = Channel} = State) ->
     Request = #{},
-    Ctx = ctx:with_deadline_after(?RPC_TIMEOUT_SEC, seconds),
+    Ctx = ctx:with_deadline_after(?HEALTH_CHECK_TIMEOUT, millisecond),
     Reply =
         greptime_v_1_health_check_client:health_check(Ctx, Request, #{channel => Channel}),
     case Reply of
@@ -85,14 +87,14 @@ terminate(Reason, #state{channel = Channel} = State) ->
 %%% Public functions
 %%%===================================================================
 handle(Pid, Request) ->
-    gen_server:call(Pid, {handle, Request}, ?TIMEOUT_MS).
+    gen_server:call(Pid, {handle, Request}, ?CALL_TIMEOUT).
 
 health_check(Pid) ->
-    gen_server:call(Pid, health_check, ?TIMEOUT_MS).
+    gen_server:call(Pid, health_check, ?HEALTH_CHECK_TIMEOUT).
 
 stream(Pid) ->
-    {ok, Channel} = gen_server:call(Pid, channel, ?TIMEOUT_MS),
-    Ctx = ctx:with_deadline_after(?RPC_TIMEOUT_SEC, seconds),
+    {ok, Channel} = gen_server:call(Pid, channel, ?CALL_TIMEOUT),
+    Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
     greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}).
 
 ddl() ->
