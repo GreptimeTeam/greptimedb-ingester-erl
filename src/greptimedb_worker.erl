@@ -26,6 +26,9 @@
 
 -record(state, {channel}).
 
+-define(TIMEOUT_MS, 12_000).
+-define(RPC_TIMEOUT_SEC, 10).
+
 %% ===================================================================
 %% gen_server callbacks
 %% ===================================================================
@@ -40,7 +43,8 @@ init(Args) ->
     {ok, #state{channel = Channel}}.
 
 handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
-    Reply = greptime_v_1_greptime_database_client:handle(Request, #{channel => Channel}),
+    Ctx = ctx:with_deadline_after(?RPC_TIMEOUT_SEC, seconds),
+    Reply = greptime_v_1_greptime_database_client:handle(Ctx, Request, #{channel => Channel}),
     case Reply of
         {ok, Resp, _} ->
             {reply, {ok, Resp}, State};
@@ -51,7 +55,9 @@ handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
     end;
 handle_call(health_check, _From, #state{channel = Channel} = State) ->
     Request = #{},
-    Reply = greptime_v_1_health_check_client:health_check(Request, #{channel => Channel}),
+    Ctx = ctx:with_deadline_after(?RPC_TIMEOUT_SEC, seconds),
+    Reply =
+        greptime_v_1_health_check_client:health_check(Ctx, Request, #{channel => Channel}),
     case Reply of
         {ok, Resp, _} ->
             {reply, {ok, Resp}, State};
@@ -79,14 +85,15 @@ terminate(Reason, #state{channel = Channel} = State) ->
 %%% Public functions
 %%%===================================================================
 handle(Pid, Request) ->
-    gen_server:call(Pid, {handle, Request}).
+    gen_server:call(Pid, {handle, Request}, ?TIMEOUT_MS).
 
 health_check(Pid) ->
-    gen_server:call(Pid, health_check).
+    gen_server:call(Pid, health_check, ?TIMEOUT_MS).
 
 stream(Pid) ->
-    {ok, Channel} = gen_server:call(Pid, channel),
-    greptime_v_1_greptime_database_client:handle_requests(#{channel => Channel}).
+    {ok, Channel} = gen_server:call(Pid, channel, ?TIMEOUT_MS),
+    Ctx = ctx:with_deadline_after(?RPC_TIMEOUT_SEC, seconds),
+    greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}).
 
 ddl() ->
     todo.
