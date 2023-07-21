@@ -101,8 +101,6 @@ values_size(#{ts_microsecond_values := Values}) ->
 values_size(#{ts_nanosecond_values := Values}) ->
     length(Values).
 
-merge_values(V1, V2) when map_size(V1) == 0 ->
-    V2;
 merge_values(#{i8_values := V1} = L, #{i8_values := V2}) ->
     L#{i8_values := [V2 | V1]};
 merge_values(#{i16_values := V1} = L, #{i16_values := V2}) ->
@@ -138,7 +136,9 @@ merge_values(#{ts_millisecond_values := V1} = L, #{ts_millisecond_values := V2})
 merge_values(#{ts_microsecond_values := V1} = L, #{ts_microsecond_values := V2}) ->
     L#{ts_microsecond_values := [V2 | V1]};
 merge_values(#{ts_nanosecond_values := V1} = L, #{ts_nanosecond_values := V2}) ->
-    L#{ts_nanosecond_values := [V2 | V1]}.
+    L#{ts_nanosecond_values := [V2 | V1]};
+merge_values(V1, V2) when map_size(V1) == 0 ->
+    V2.
 
 pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
     ValuesSize = values_size(Values),
