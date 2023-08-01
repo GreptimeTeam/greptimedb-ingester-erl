@@ -12,7 +12,8 @@ all() ->
      t_write_batch,
      t_bench_perf,
      t_write_stream,
-     t_async_write_batch].
+     t_async_write_batch,
+     t_auth_error].
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].

@@ -35,7 +35,7 @@
 -define(REQUEST_TIMEOUT, 10_000).
 -define(CONNECT_TIMEOUT, 5_000).
 -define(ASYNC_BATCH_SIZE, 100).
--define(ASYNC_BATCH_TIMEOUT, 1000).
+-define(ASYNC_BATCH_TIMEOUT, 100).
 -define(ASYNC_REQ(Req, ExpireAt, ResultCallback),
         {async, Req, ExpireAt, ResultCallback}
        ).
