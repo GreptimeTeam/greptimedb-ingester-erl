@@ -5,9 +5,14 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-%%t_write, t_write_stream, t_insert_requests, t_write_batch, t_bench_perf,
 all() ->
-    [t_write_stream, t_async_write_batch].
+    [t_write,
+     t_write_stream,
+     t_insert_requests,
+     t_write_batch,
+     t_bench_perf,
+     t_write_stream,
+     t_async_write_batch].
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].
@@ -334,7 +339,6 @@ t_bench_perf(_) ->
     greptimedb:stop_client(Client),
     ok.
 
-
 async_write(Client, StartMs) ->
     Ref = make_ref(),
     TestPid = self(),
@@ -353,11 +357,10 @@ recv(Ref) ->
             ct:print("Reply ~w~n", [Reply])
     end.
 
-
 t_async_write_batch(_) ->
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
-         {pool, greptimedb_client_pool2},
+         {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
@@ -368,15 +371,10 @@ t_async_write_batch(_) ->
     StartMs = 1690874475279,
     N = 100,
 
-    Refs = lists:map(fun(Num) ->
-                      async_write(Client, StartMs + Num * 10)
-              end,
-              lists:seq(1, N)),
+    Refs =
+        lists:map(fun(Num) -> async_write(Client, StartMs + Num * 10) end, lists:seq(1, N)),
 
-    lists:foreach(fun(Ref) ->
-                          recv(Ref)
-                          end,
-                  Refs),
+    lists:foreach(fun(Ref) -> recv(Ref) end, Refs),
 
     greptimedb:stop_client(Client),
     ok.

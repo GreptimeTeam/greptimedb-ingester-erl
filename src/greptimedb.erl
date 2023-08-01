@@ -15,8 +15,7 @@
 -module(greptimedb).
 
 -export([start_client/1, stop_client/1, write_batch/2, write/3, write_stream/1,
-         async_write/4, async_write_batch/3,
-         is_alive/1, is_alive/2, ddl/1]).
+         async_write/4, async_write_batch/3, is_alive/1, is_alive/2, ddl/1]).
 
 -spec start_client(list()) ->
                       {ok, Client :: map()} |

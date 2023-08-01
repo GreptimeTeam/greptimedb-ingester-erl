@@ -24,8 +24,7 @@ write_request(Stream, Request) ->
         grpcbox_client:send(Stream, Request)
     catch
         E:R:S ->
-            logger:error("[GreptimeDB] stream write ~0p failed: ~0p ~0p ~p",
-                         [Request, E, R, S]),
+            logger:error("[GreptimeDB] stream write ~0p failed: ~0p ~0p ~p", [Request, E, R, S]),
             {error, R}
     end.
 
