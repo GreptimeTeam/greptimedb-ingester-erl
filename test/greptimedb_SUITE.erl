@@ -335,19 +335,17 @@ t_bench_perf(_) ->
     ok.
 
 
-async_write(Client) ->
+async_write(Client, StartMs) ->
     Ref = make_ref(),
     TestPid = self(),
     ResultCallback = {fun(Reply) -> TestPid ! {{Ref, reply}, Reply} end, []},
 
     Metric = <<"async_metrics">>,
-    Points = bench_points(1690874475279, 10),
+    Points = bench_points(StartMs, 10),
 
     ok = greptimedb:async_write_batch(Client, [{Metric, Points}], ResultCallback),
-    receive
-        {{Ref, reply}, Reply} ->
-            ct:print("~w~n", [Reply])
-    end.
+
+    Ref.
 
 t_async_write_batch(_) ->
     Options =
@@ -360,7 +358,18 @@ t_async_write_batch(_) ->
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
 
-    async_write(Client),
+    StartMs = 1690874475279,
 
+    Ref1 = async_write(Client, StartMs),
+    Ref2 = async_write(Client, StartMs + 10),
+    Ref3 = async_write(Client, StartMs + 20),
+    receive
+        {{Ref1, reply}, Reply} ->
+            ct:print("Reply1 ~w~n", [Reply]);
+        {{Ref2, reply}, Reply} ->
+            ct:print("Reply2 ~w~n", [Reply]);
+        {{Ref3, reply}, Reply} ->
+            ct:print("Reply3 ~w~n", [Reply])
+    end,
     greptimedb:stop_client(Client),
     ok.

@@ -31,7 +31,7 @@ write_request(Stream, Request) ->
 
 -spec finish(Stream :: map()) -> {ok, term()} | {error, term()}.
 finish(Stream) ->
-    finish(Stream, 5000).
+    finish(Stream, 10_000).
 
 -spec finish(Stream :: map(), Timeout :: integer()) -> {ok, term()} | {error, term()}.
 finish(Stream, Timeout) ->

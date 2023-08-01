@@ -34,7 +34,8 @@
 -define(HEALTH_CHECK_TIMEOUT, 1_000).
 -define(REQUEST_TIMEOUT, 10_000).
 -define(CONNECT_TIMEOUT, 5_000).
--define(ASYNC_BATCH_SIZE, 1).
+-define(ASYNC_BATCH_SIZE, 100).
+-define(ASYNC_BATCH_TIMEOUT, 50).
 -define(ASYNC_REQ(Req, ExpireAt, ResultCallback),
         {async, Req, ExpireAt, ResultCallback}
        ).
@@ -84,12 +85,17 @@ handle_call(channel, _From, #state{channel = Channel} = State) ->
 handle_info(?ASYNC_REQ(Request, ExpireAt, ResultCallback), State0) ->
     Req = ?REQ(Request, ExpireAt),
     State1 = enqueue_req(ResultCallback, Req, State0),
-    State = maybe_shoot(State1),
-    {noreply, State};
-handle_info(Info, State) ->
-    logger:warn("~p unexpected_info: ~p, channel: ~p", [?MODULE, Info, State#state.channel]),
+    State = maybe_shoot(State1, false),
+    {noreply, State, ?ASYNC_BATCH_TIMEOUT};
 
-    {noreply, State}.
+handle_info(timeout, State0) ->
+    State1 = maybe_shoot(State0, true),
+    {noreply, State1, ?ASYNC_BATCH_TIMEOUT};
+
+handle_info(Info, State) ->
+    logger:debug("~p unexpected_info: ~p, channel: ~p", [?MODULE, Info, State#state.channel]),
+
+    {noreply, State, ?ASYNC_BATCH_TIMEOUT}.
 
 
 start_link(Args) ->
@@ -111,10 +117,10 @@ now_() ->
     erlang:system_time(millisecond).
 
 
-fresh_expire_at(infinity = _Timeout) ->
-    infinity;
 fresh_expire_at(Timeout) when is_integer(Timeout) ->
-    now_() + Timeout.
+    now_() + Timeout;
+fresh_expire_at(_Timeout) ->
+    infinity.
 
 enqueue_latest_fn(#{prioritise_latest := true}) ->
     fun queue:in_r/2;
@@ -158,7 +164,7 @@ enqueue_req(ReplyTo, Req, #state{requests = Requests0} = State) ->
 
 
 %% Try to write requests
-maybe_shoot(#state{requests = Requests0, channel = Channel} = State0) ->
+maybe_shoot(#state{requests = Requests0, channel = Channel} = State0, Force) ->
     State = State0#state{requests = drop_expired(Requests0)},
     %% If the channel is down
     ClientDown = is_pid(Channel) andalso (not is_process_alive(Channel)),
@@ -166,19 +172,27 @@ maybe_shoot(#state{requests = Requests0, channel = Channel} = State0) ->
         true ->
             State;
         false ->
-            do_shoot(State)
+            do_shoot(State, Force)
     end.
 
-do_shoot(#state{requests = #{pending := Pending0, pending_count := N} = Requests0, channel = Channel} = State0) when N >= ?ASYNC_BATCH_SIZE ->
+
+do_shoot(#state{requests = #{pending := Pending0, pending_count := N} = Requests0, channel = Channel} = State0, _Force) when
+      N >= ?ASYNC_BATCH_SIZE ->
+    do_shoot(State0, Requests0, Pending0, N, Channel);
+
+do_shoot(#state{requests = #{pending := Pending0, pending_count := N} = Requests0, channel = Channel} = State0, true) when
+      N > 0 ->
+    do_shoot(State0, Requests0, Pending0, N, Channel);
+do_shoot(State, _Force) ->
+    State.
+
+do_shoot(State0, Requests0, Pending0, N, Channel) ->
     {{value, ?PEND_REQ(ReplyTo, Req)}, Pending} = queue:out(Pending0),
     Requests = Requests0#{pending := Pending, pending_count := N - 1},
     State1 = State0#state{requests = Requests},
     Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
     {ok, Stream} = greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}),
-    shoot(Stream, Req, ReplyTo, State1, []);
-
-do_shoot(State) ->
-    State.
+    shoot(Stream, Req, ReplyTo, State1, []).
 
 shoot(Stream, ?REQ(Req, _), ReplyTo, #state{requests = #{pending_count := 0}} = State, ReplyToList) ->
 
