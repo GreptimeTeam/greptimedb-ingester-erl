@@ -1,6 +1,6 @@
 -module(greptimedb_stream).
 
--export([write/3, finish/1]).
+-export([write/3, write_batch/2, write_request/2, finish/1]).
 
 -spec write(Stream, Metric, Points) -> {ok, term()} | {error, term()}
     when Stream :: map(),
@@ -13,13 +13,19 @@
                fields => map(),
                timestamp => integer()}.
 write(Stream, Metric, Points) ->
+    write_batch(Stream, [{Metric, Points}]).
+
+write_batch(Stream, MetricAndPoints) ->
+    Request = greptimedb_encoder:insert_requests(Stream, MetricAndPoints),
+    write_request(Stream, Request).
+
+write_request(Stream, Request) ->
     try
-        Request = greptimedb_encoder:insert_requests(Stream, [{Metric, Points}]),
         grpcbox_client:send(Stream, Request)
     catch
         E:R:S ->
-            logger:error("[GreptimeDB] stream write ~0p failed: ~0p ~0p ~0p ~p",
-                         [Metric, Points, E, R, S]),
+            logger:error("[GreptimeDB] stream write ~0p failed: ~0p ~0p ~p",
+                         [Request, E, R, S]),
             {error, R}
     end.
 

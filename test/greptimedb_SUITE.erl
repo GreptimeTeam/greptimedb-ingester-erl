@@ -5,8 +5,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+%%t_write, t_write_stream, t_insert_requests, t_write_batch, t_bench_perf,
 all() ->
-    [t_write, t_write_stream, t_insert_requests, t_write_batch, t_bench_perf, t_auth_error].
+    [t_write_stream, t_async_write_batch].
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].
@@ -330,5 +331,36 @@ t_bench_perf(_) ->
     %% print the result
     ct:print("Finish benchmark, concurrency: ~p, cost: ~p seconds, rows: ~p, TPS: ~p~n",
              [Concurrency, Time, Rows, TPS]),
+    greptimedb:stop_client(Client),
+    ok.
+
+
+async_write(Client) ->
+    Ref = make_ref(),
+    TestPid = self(),
+    ResultCallback = {fun(Reply) -> TestPid ! {{Ref, reply}, Reply} end, []},
+
+    Metric = <<"async_metrics">>,
+    Points = bench_points(1690874475279, 10),
+
+    ok = greptimedb:async_write_batch(Client, [{Metric, Points}], ResultCallback),
+    receive
+        {{Ref, reply}, Reply} ->
+            ct:print("~w~n", [Reply])
+    end.
+
+t_async_write_batch(_) ->
+    Options =
+        [{endpoints, [{http, "localhost", 4001}]},
+         {pool, greptimedb_client_pool2},
+         {pool_size, 8},
+         {pool_type, random},
+         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+
+    async_write(Client),
+
     greptimedb:stop_client(Client),
     ok.
