@@ -117,10 +117,8 @@ now_() ->
     erlang:system_time(millisecond).
 
 
-fresh_expire_at(Timeout) when is_integer(Timeout) ->
-    now_() + Timeout;
-fresh_expire_at(_Timeout) ->
-    infinity.
+fresh_expire_at(Timeout) ->
+    now_() + Timeout.
 
 enqueue_latest_fn(#{prioritise_latest := true}) ->
     fun queue:in_r/2;
