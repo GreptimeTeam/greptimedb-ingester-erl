@@ -35,7 +35,7 @@
 -define(REQUEST_TIMEOUT, 10_000).
 -define(CONNECT_TIMEOUT, 5_000).
 -define(ASYNC_BATCH_SIZE, 100).
--define(ASYNC_BATCH_TIMEOUT, 50).
+-define(ASYNC_BATCH_TIMEOUT, 1000).
 -define(ASYNC_REQ(Req, ExpireAt, ResultCallback),
         {async, Req, ExpireAt, ResultCallback}
        ).
@@ -190,35 +190,35 @@ do_shoot(State0, Requests0, Pending0, N, Channel) ->
     State1 = State0#state{requests = Requests},
     Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
     {ok, Stream} = greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}),
-    shoot(Stream, Req, ReplyTo, State1, []).
+    shoot(Stream, Req, State1, [ReplyTo]).
 
-shoot(Stream, ?REQ(Req, _), ReplyTo, #state{requests = #{pending_count := 0}} = State, ReplyToList) ->
 
+shoot(Stream, ?REQ(Req, _), #state{requests = #{pending_count := 0}} = State, ReplyToList) ->
     %% Write the last request and finish stream
     case greptimedb_stream:write_request(Stream, Req) of
         ok ->
             Result =  greptimedb_stream:finish(Stream),
-            lists:foreach(fun(ReplyTo0) ->
-                                  reply(ReplyTo0, Result)
-                          end, [ReplyTo | ReplyToList]);
+            lists:foreach(fun(ReplyTo) ->
+                                  reply(ReplyTo, Result)
+                          end, ReplyToList);
         Error ->
-            lists:foreach(fun(ReplyTo0) ->
-                                  reply(ReplyTo0, Error)
-                          end, [ReplyTo | ReplyToList])
+            lists:foreach(fun(ReplyTo) ->
+                                  reply(ReplyTo, Error)
+                          end, ReplyToList)
     end,
     State;
 
-shoot(Stream, ?REQ(Req, _), ReplyTo, #state{requests = #{pending := Pending0, pending_count := N} = Requests0} = State0, ReplyToList) ->
+shoot(Stream, ?REQ(Req, _), #state{requests = #{pending := Pending0, pending_count := N} = Requests0} = State0, ReplyToList) ->
     case greptimedb_stream:write_request(Stream, Req) of
         ok ->
-            {{value, ?PEND_REQ(ReplyTo, Req)}, Pending} = queue:out(Pending0),
+            {{value, ?PEND_REQ(ReplyTo, NextReq)}, Pending} = queue:out(Pending0),
             Requests = Requests0#{pending := Pending, pending_count := N - 1},
             State1 = State0#state{requests = Requests},
-            shoot(Stream, Req, ReplyTo, State1, [ReplyTo | ReplyToList]);
+            shoot(Stream, NextReq, State1, [ReplyTo | ReplyToList]);
         Error ->
-            lists:foreach(fun(ReplyTo0) ->
-                                  reply(ReplyTo0, Error)
-                          end, [ReplyTo | ReplyToList]),
+            lists:foreach(fun(ReplyTo) ->
+                                  reply(ReplyTo, Error)
+                          end, ReplyToList),
             State0
     end.
 

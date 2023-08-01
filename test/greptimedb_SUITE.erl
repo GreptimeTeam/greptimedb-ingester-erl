@@ -347,6 +347,13 @@ async_write(Client, StartMs) ->
 
     Ref.
 
+recv(Ref) ->
+    receive
+        {{Ref, reply}, Reply} ->
+            ct:print("Reply ~w~n", [Reply])
+    end.
+
+
 t_async_write_batch(_) ->
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
@@ -359,17 +366,17 @@ t_async_write_batch(_) ->
     true = greptimedb:is_alive(Client),
 
     StartMs = 1690874475279,
+    N = 100,
 
-    Ref1 = async_write(Client, StartMs),
-    Ref2 = async_write(Client, StartMs + 10),
-    Ref3 = async_write(Client, StartMs + 20),
-    receive
-        {{Ref1, reply}, Reply} ->
-            ct:print("Reply1 ~w~n", [Reply]);
-        {{Ref2, reply}, Reply} ->
-            ct:print("Reply2 ~w~n", [Reply]);
-        {{Ref3, reply}, Reply} ->
-            ct:print("Reply3 ~w~n", [Reply])
-    end,
+    Refs = lists:map(fun(Num) ->
+                      async_write(Client, StartMs + Num * 10)
+              end,
+              lists:seq(1, N)),
+
+    lists:foreach(fun(Ref) ->
+                          recv(Ref)
+                          end,
+                  Refs),
+
     greptimedb:stop_client(Client),
     ok.
