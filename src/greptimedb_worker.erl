@@ -86,11 +86,11 @@ handle_info(?ASYNC_REQ(Request, ExpireAt, ResultCallback), State0) ->
     Req = ?REQ(Request, ExpireAt),
     State1 = enqueue_req(ResultCallback, Req, State0),
     State = maybe_shoot(State1, false),
-    {noreply, State, ?ASYNC_BATCH_TIMEOUT};
+    noreply_state(State);
 
 handle_info(timeout, State0) ->
-    State1 = maybe_shoot(State0, true),
-    {noreply, State1, ?ASYNC_BATCH_TIMEOUT};
+    State = maybe_shoot(State0, true),
+    noreply_state(State);
 
 handle_info(Info, State) ->
     logger:debug("~p unexpected_info: ~p, channel: ~p", [?MODULE, Info, State#state.channel]),
@@ -145,6 +145,12 @@ reply({F, A}, Result) when is_function(F) ->
     ok;
 reply(From, Result) ->
     gen_server:reply(From, Result).
+
+noreply_state(#state{requests = #{pending_count := N}} = State) when N > 0 ->
+    {noreply, State, ?ASYNC_BATCH_TIMEOUT};
+
+noreply_state(State) ->
+    {noreply, State}.
 
 
 %%%===================================================================

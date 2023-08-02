@@ -370,12 +370,15 @@ t_async_write_batch(_) ->
     true = greptimedb:is_alive(Client),
 
     StartMs = 1690874475279,
-    N = 100,
+    %% Write once
+    Ref = async_write(Client, StartMs + 100000),
+    recv(Ref),
 
+    %% Write batches
+    N = 100,
     Refs =
         lists:map(fun(Num) -> async_write(Client, StartMs + Num * 10) end, lists:seq(1, N)),
-
-    lists:foreach(fun(Ref) -> recv(Ref) end, Refs),
+    lists:foreach(fun(Ref0) -> recv(Ref0) end, Refs),
 
     greptimedb:stop_client(Client),
     ok.
