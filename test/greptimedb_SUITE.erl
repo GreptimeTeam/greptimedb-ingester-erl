@@ -6,7 +6,14 @@
 -include_lib("eunit/include/eunit.hrl").
 
 all() ->
-    [t_write, t_write_stream, t_insert_requests, t_write_batch, t_bench_perf, t_auth_error].
+    [t_write,
+     t_write_stream,
+     t_insert_requests,
+     t_write_batch,
+     t_bench_perf,
+     t_write_stream,
+     t_async_write_batch,
+     t_auth_error].
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].
@@ -330,5 +337,48 @@ t_bench_perf(_) ->
     %% print the result
     ct:print("Finish benchmark, concurrency: ~p, cost: ~p seconds, rows: ~p, TPS: ~p~n",
              [Concurrency, Time, Rows, TPS]),
+    greptimedb:stop_client(Client),
+    ok.
+
+async_write(Client, StartMs) ->
+    Ref = make_ref(),
+    TestPid = self(),
+    ResultCallback = {fun(Reply) -> TestPid ! {{Ref, reply}, Reply} end, []},
+
+    Metric = <<"async_metrics">>,
+    Points = bench_points(StartMs, 10),
+
+    ok = greptimedb:async_write_batch(Client, [{Metric, Points}], ResultCallback),
+
+    Ref.
+
+recv(Ref) ->
+    receive
+        {{Ref, reply}, Reply} ->
+            ct:print("Reply ~w~n", [Reply])
+    end.
+
+t_async_write_batch(_) ->
+    Options =
+        [{endpoints, [{http, "localhost", 4001}]},
+         {pool, greptimedb_client_pool},
+         {pool_size, 8},
+         {pool_type, random},
+         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+
+    StartMs = 1690874475279,
+    %% Write once
+    Ref = async_write(Client, StartMs + 100000),
+    recv(Ref),
+
+    %% Write batches
+    N = 100,
+    Refs =
+        lists:map(fun(Num) -> async_write(Client, StartMs + Num * 10) end, lists:seq(1, N)),
+    lists:foreach(fun(Ref0) -> recv(Ref0) end, Refs),
+
     greptimedb:stop_client(Client),
     ok.

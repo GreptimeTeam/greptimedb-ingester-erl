@@ -15,7 +15,7 @@
 -module(greptimedb).
 
 -export([start_client/1, stop_client/1, write_batch/2, write/3, write_stream/1,
-         is_alive/1, is_alive/2, ddl/1]).
+         async_write/4, async_write_batch/3, is_alive/1, is_alive/2, ddl/1]).
 
 -spec start_client(list()) ->
                       {ok, Client :: map()} |
@@ -38,6 +38,21 @@ start_client(Options0) ->
             {error, Reason}
     end.
 
+%% @doc Write points to the metric table, return the result.
+-spec write(Client, Metric, Points) -> {ok, term()} | {error, term()}
+    when Client :: map(),
+         Metric :: Table | {DbName, Table},
+         DbName :: atom() | binary() | list(),
+         Table :: atom() | binary() | list(),
+         Points :: [Point],
+         Point ::
+             #{tags => map(),
+               fields => map(),
+               timestamp => integer()}.
+write(Client, Metric, Points) ->
+    write_batch(Client, [{Metric, Points}]).
+
+%% @doc Write a batch of data points to the database, return the result.
 -spec write_batch(Client, MetricAndPoints) -> {ok, term()} | {error, term()}
     when Client :: map(),
          MetricAndPoints :: [MetricAndPoint],
@@ -60,19 +75,7 @@ write_batch(Client, MetricAndPoints) ->
             {error, R}
     end.
 
--spec write(Client, Metric, Points) -> {ok, term()} | {error, term()}
-    when Client :: map(),
-         Metric :: Table | {DbName, Table},
-         DbName :: atom() | binary() | list(),
-         Table :: atom() | binary() | list(),
-         Points :: [Point],
-         Point ::
-             #{tags => map(),
-               fields => map(),
-               timestamp => integer()}.
-write(Client, Metric, Points) ->
-    write_batch(Client, [{Metric, Points}]).
-
+%% @doc Create a gRPC stream to write data, return the stream or an error.
 -spec write_stream(Client) -> {ok, term()} | {error, term()} when Client :: map().
 write_stream(Client) ->
     try
@@ -82,6 +85,39 @@ write_stream(Client) ->
             logger:error("[GreptimeDB] create write stream failed: ~0p ~0p ~p", [E, R, S]),
             {error, R}
     end.
+
+%% @doc Send an async request to write points to the metric table. The callback is evaluated when an error happens or response is received.
+-spec async_write(Client, Metric, Points, ResultCallback) -> ok | {error, term()}
+    when Client :: map(),
+         Metric :: Table | {DbName, Table},
+         DbName :: atom() | binary() | list(),
+         Table :: atom() | binary() | list(),
+         Points :: [Point],
+         Point ::
+             #{tags => map(),
+               fields => map(),
+               timestamp => integer()},
+         ResultCallback :: {function(), list()}.
+async_write(Client, Metric, Points, ResultCallback) ->
+    async_write_batch(Client, [{Metric, Points}], ResultCallback).
+
+%% @doc Send a batch of async request. The callback is evaluated when an error happens or response is received.
+-spec async_write_batch(Client, MetricAndPoints, ResultCallback) -> ok | {error, term()}
+    when Client :: map(),
+         MetricAndPoints :: [MetricAndPoint],
+         MetricAndPoint :: {Metric, Points},
+         Metric :: Table | {DbName, Table},
+         DbName :: atom() | binary() | list(),
+         Table :: atom() | binary() | list(),
+         Points :: [Point],
+         Point ::
+             #{tags => map(),
+               fields => map(),
+               timestamp => integer()},
+         ResultCallback :: {function(), list()}.
+async_write_batch(Client, MetricAndPoints, ResultCallback) ->
+    Request = greptimedb_encoder:insert_requests(Client, MetricAndPoints),
+    async_handle(Client, Request, ResultCallback).
 
 ddl(_Client) ->
     todo.
@@ -120,7 +156,17 @@ handle(#{pool := Pool} = _Client, Request) ->
         ecpool:with_client(Pool, Fun)
     catch
         E:R:S ->
-            logger:error("[GreptimeDB] grpc write fail: ~0p ~0p ~0p", [E, R, S]),
+            logger:error("[GreptimeDB] grpc handle fail: ~0p ~0p ~0p", [E, R, S]),
+            {error, {E, R}}
+    end.
+
+async_handle(#{pool := Pool} = _Client, Request, ResultCallback) ->
+    Fun = fun(Worker) -> greptimedb_worker:async_handle(Worker, Request, ResultCallback) end,
+    try
+        ecpool:with_client(Pool, Fun)
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] grpc async_handle fail: ~0p ~0p ~0p", [E, R, S]),
             {error, {E, R}}
     end.
 
