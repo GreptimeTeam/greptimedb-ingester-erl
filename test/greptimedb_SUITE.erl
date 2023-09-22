@@ -258,11 +258,16 @@ bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding, Written) ->
                 _Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
                 length(Points);
             false ->
-                {ok, #{response := {affected_rows, #{value := AffectedRows}}}} =
-                    greptimedb:write(Client,
-                                     <<"bench_metrics">>,
-                                     bench_points(1687814974000 - N, BatchSize)),
-                AffectedRows
+                case greptimedb:write(Client,
+                                      <<"bench_metrics">>,
+                                      bench_points(1687814974000 - N, BatchSize))
+                of
+                    {ok, #{response := {affected_rows, #{value := AffectedRows}}}} ->
+                        AffectedRows;
+                    Err ->
+                        ct:print("Write error: ~w~n", [Err]),
+                        0
+                end
         end,
 
     NewWritten = Written + Rows,
@@ -288,10 +293,10 @@ t_bench_perf(_) ->
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
     BatchSize = 100,
-    Num = 1000,
+    Num = 10000,
     Profile = false,
     BenchmarkEncoding = false,
-    Concurrency = 3,
+    Concurrency = 10,
     {MegaSecs, Secs, _MicroSecs} = erlang:timestamp(),
     StartMs = (MegaSecs * 1000000 + Secs) * 1000,
 
