@@ -13,10 +13,9 @@ jobs:
 
   build:
 
-    runs-on: ubuntu-22.04
-
+    runs-on: ubuntu-latest
     container:
-      image: erlang:25.3
+      image: shiguredo/erlang:otp-26.0.2-openssl-3.1.1-ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v3
