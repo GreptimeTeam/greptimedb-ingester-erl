@@ -35,7 +35,7 @@ jobs:
     - name: Run tests
       run: |
         cat /tmp/greptimedb.log
-        rebar3 ct --cover
+        rebar3 ct -v --cover
     - name: Dialyzer
       run: rebar3 dialyzer
     - name: Coveralls

@@ -158,12 +158,14 @@ t_auth_error(_) ->
            timestamp => 1619775143098}],
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
-         {pool, greptimedb_client_pool},
+         {pool, greptimedb_client_pool_auth_err},
          {pool_size, 5},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"wrong_pwd">>}}}],
     {ok, Client} = greptimedb:start_client(Options),
-    {error, {unauth, _, _}} = greptimedb:write(Client, Metric, Points).
+    {error, {unauth, _, _}} = greptimedb:write(Client, Metric, Points),
+    greptimedb:stop_client(Client),
+    ok.
 
 t_write_stream(_) ->
     Options =
