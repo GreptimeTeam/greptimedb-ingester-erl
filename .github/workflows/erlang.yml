@@ -24,7 +24,7 @@ jobs:
       run: |
         GREPTIMEDB_VER=v0.4.0
         DOWNLOAD_URL=https://github.com/GreptimeTeam/greptimedb
-        curl -L ${DOWNLOAD_URL}/releases/download/${GREPTIMEDB_VER}/greptime-linux-amd64.tgz -o /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
+        curl -L ${DOWNLOAD_URL}/releases/download/${GREPTIMEDB_VER}/greptime-linux-amd64-${GREPTIMEDB_VER}.tgz -o /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
         mkdir -p /tmp/greptimedb-download
         tar xzvf /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz -C /tmp/greptimedb-download
         rm -f /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
