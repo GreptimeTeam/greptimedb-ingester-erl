@@ -158,7 +158,7 @@ t_auth_error(_) ->
            timestamp => 1619775143098}],
     Options =
         [{endpoints, [{http, "localhost", 4001}]},
-         {pool, greptimedb_client_pool_auth_err},
+         {pool, greptimedb_client_pool},
          {pool_size, 5},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"wrong_pwd">>}}}],
