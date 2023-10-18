@@ -163,7 +163,9 @@ t_auth_error(_) ->
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"wrong_pwd">>}}}],
     {ok, Client} = greptimedb:start_client(Options),
-    {error, {unauth, _, _}} = greptimedb:write(Client, Metric, Points).
+    {error, {unauth, _, _}} = greptimedb:write(Client, Metric, Points),
+    greptimedb:stop_client(Client),
+    ok.
 
 t_write_stream(_) ->
     Options =
@@ -216,7 +218,7 @@ rand_string(Bytes) ->
     base64:encode(
         crypto:strong_rand_bytes(Bytes)).
 
-bench_points(StartTs, N) ->
+bench_points(StartTs, N, Tags) ->
     lists:map(fun(Num) ->
                  #{fields =>
                        #{<<"f0">> => Num,
@@ -239,34 +241,34 @@ bench_points(StartTs, N) ->
                          <<"tag6">> => <<"tagv6">>,
                          <<"tag7">> => <<"tagv7">>,
                          <<"tag8">> => <<"tagv8">>,
-                         <<"tag9">> => rand_string(8)},
+                         <<"tag9">> => element(rand:uniform(tuple_size(Tags)), Tags)},
                    timestamp => StartTs + Num}
               end,
               lists:seq(1, N)).
 
-bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding) ->
-    bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding, 0).
+bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding, Tags) ->
+    bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding, Tags, 0).
 
-bench_write(0, _StartMs, _BatchSize, _Client, _BenchmarkEncoding, Written) ->
+bench_write(0, _StartMs, _BatchSize, _Client, _BenchmarkEncoding, _Tags, Written) ->
     Written;
-bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding, Written) ->
+bench_write(N, StartMs, BatchSize, Client, BenchmarkEncoding, Tags, Written) ->
     Rows =
         case BenchmarkEncoding of
             true ->
                 Metric = <<"bench_metrics">>,
-                Points = bench_points(StartMs - N, BatchSize),
+                Points = bench_points(StartMs + N, BatchSize, Tags),
                 _Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
                 length(Points);
             false ->
                 {ok, #{response := {affected_rows, #{value := AffectedRows}}}} =
                     greptimedb:write(Client,
                                      <<"bench_metrics">>,
-                                     bench_points(1687814974000 - N, BatchSize)),
+                                     bench_points(StartMs + N, BatchSize, Tags)),
                 AffectedRows
         end,
 
     NewWritten = Written + Rows,
-    bench_write(N - 1, StartMs, BatchSize, Client, BenchmarkEncoding, NewWritten).
+    bench_write(N - 1, StartMs, BatchSize, Client, BenchmarkEncoding, Tags, NewWritten).
 
 join([P | Ps]) ->
     receive
@@ -289,14 +291,16 @@ t_bench_perf(_) ->
     true = greptimedb:is_alive(Client),
     BatchSize = 100,
     Num = 1000,
+    Series = 1000,
     Profile = false,
     BenchmarkEncoding = false,
     Concurrency = 3,
     {MegaSecs, Secs, _MicroSecs} = erlang:timestamp(),
-    StartMs = (MegaSecs * 1000000 + Secs) * 1000,
+    StartMs0 = (MegaSecs * 1000000 + Secs) * 1000,
 
+    Tags = list_to_tuple(lists:map(fun(_N) -> rand_string(8) end, lists:seq(1, Series))),
     %% warmup
-    bench_write(1000, StartMs, BatchSize, Client, BenchmarkEncoding),
+    bench_write(1000, StartMs0, BatchSize, Client, BenchmarkEncoding, Tags),
     ct:print("Warmed up, start to benchmark writing..."),
     %% benchmark
     T1 = erlang:monotonic_time(),
@@ -308,7 +312,12 @@ t_bench_perf(_) ->
                 eprof:log("/tmp/eprof.result"),
                 {ok, Ret} =
                     eprof:profile(fun() ->
-                                     bench_write(Num, StartMs, BatchSize, Client, BenchmarkEncoding)
+                                     bench_write(Num,
+                                                 StartMs0,
+                                                 BatchSize,
+                                                 Client,
+                                                 BenchmarkEncoding,
+                                                 Tags)
                                   end),
                 eprof:analyze(),
                 eprof:stop(),
@@ -318,12 +327,14 @@ t_bench_perf(_) ->
                 Pids =
                     lists:map(fun(C) ->
                                  spawn(fun() ->
+                                          StartMs1 = StartMs0 - C * Num,
                                           Written =
                                               bench_write(Num,
-                                                          StartMs - C * Num * BatchSize,
+                                                          StartMs1,
                                                           BatchSize,
                                                           Client,
-                                                          BenchmarkEncoding),
+                                                          BenchmarkEncoding,
+                                                          Tags),
                                           Parent ! {self(), Written}
                                        end)
                               end,
@@ -335,8 +346,8 @@ t_bench_perf(_) ->
     Time = erlang:convert_time_unit(T2 - T1, native, seconds),
     TPS = Rows / Time,
     %% print the result
-    ct:print("Finish benchmark, concurrency: ~p, cost: ~p seconds, rows: ~p, TPS: ~p~n",
-             [Concurrency, Time, Rows, TPS]),
+    ct:print("Finish benchmark, series: ~p, concurrency: ~p, cost: ~p seconds, rows: ~p, TPS: ~p~n",
+             [Series, Concurrency, Time, Rows, TPS]),
     greptimedb:stop_client(Client),
     ok.
 
@@ -345,8 +356,9 @@ async_write(Client, StartMs) ->
     TestPid = self(),
     ResultCallback = {fun(Reply) -> TestPid ! {{Ref, reply}, Reply} end, []},
 
+    Tags = list_to_tuple(lists:map(fun(_N) -> rand_string(8) end, lists:seq(1, 100))),
     Metric = <<"async_metrics">>,
-    Points = bench_points(StartMs, 10),
+    Points = bench_points(StartMs, 10, Tags),
 
     ok = greptimedb:async_write_batch(Client, [{Metric, Points}], ResultCallback),
 
