@@ -15,15 +15,13 @@ jobs:
 
     runs-on: ubuntu-latest
     container:
-      image: shiguredo/erlang:otp-26.0.2-openssl-3.1.1-ubuntu-22.04
+      image: erlang:25.3
 
     steps:
     - uses: actions/checkout@v3
     - name: Setup greptimedb
       run: |
-        apt-get update
-        apt-get -y install rebar3
-        GREPTIMEDB_VER=v0.4.0
+        GREPTIMEDB_VER=v0.4.1
         DOWNLOAD_URL=https://github.com/GreptimeTeam/greptimedb
         curl -L ${DOWNLOAD_URL}/releases/download/${GREPTIMEDB_VER}/greptime-linux-amd64-${GREPTIMEDB_VER}.tar.gz -o /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
         mkdir -p /tmp/greptimedb-download
