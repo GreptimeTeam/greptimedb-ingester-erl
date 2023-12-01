@@ -53,7 +53,22 @@ Write data by rows:
         greptimedb:write(Client, Metric, Points).
 ```
 
+Write in async:
+
+```erlang
+Ref = make_ref(),
+Pid = self(),
+ResultCallback = {fun(Reply) -> Pid ! {{Ref, reply}, Reply} end, []},
+
+ok = greptimedb:async_write(Client, Metric, Points, ResultCallback),
+receive
+    {{Ref, reply}, Reply} ->
+        io:format("Reply ~w~n", [Reply])
+end.
+```
+
 Batch write:
+
 ```erlang
 Metric1 = <<"temperatures">>,
 Points1 = [...],
@@ -62,6 +77,21 @@ Points2 = [...],
 Batch = [{Metric1, Points1}, {Metric2, Points}],
 
 {ok, _} = greptimedb:write_batch(Client, Batch).
+```
+
+Batch write in async:
+
+```erlang
+Batch = ...,
+Ref = make_ref(),
+Pid = self(),
+ResultCallback = {fun(Reply) -> Pid ! {{Ref, reply}, Reply} end, []},
+
+ok = greptimedb:async_write_batch(Client, Batch, ResultCallback),
+receive
+    {{Ref, reply}, Reply} ->
+        io:format("Reply ~w~n", [Reply])
+end.
 ```
 
 Streaming write:
