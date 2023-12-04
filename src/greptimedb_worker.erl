@@ -195,9 +195,12 @@ do_shoot(State0, Requests0, Pending0, N, Channel) ->
     Requests = Requests0#{pending := Pending, pending_count := N - 1},
     State1 = State0#state{requests = Requests},
     Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
-    {ok, Stream} = greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}),
-    shoot(Stream, Req, State1, [ReplyTo]).
-
+    case greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}) of
+        {ok, Stream} ->
+            shoot(Stream, Req, State1, [ReplyTo]);
+        _Err ->
+            State0
+    end.
 
 shoot(Stream, ?REQ(Req, _), #state{requests = #{pending_count := 0}} = State, ReplyToList) ->
     %% Write the last request and finish stream
@@ -273,9 +276,12 @@ health_check(Pid) ->
     gen_server:call(Pid, health_check, ?HEALTH_CHECK_TIMEOUT).
 
 stream(Pid) ->
-    {ok, Channel} = gen_server:call(Pid, channel, ?CALL_TIMEOUT),
-    Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
-    greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}).
+    case gen_server:call(Pid, channel, ?CALL_TIMEOUT) of
+        {ok, Channel} ->
+            Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
+            greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel});
+        Err -> Err
+    end.
 
 ddl() ->
     todo.
