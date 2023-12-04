@@ -199,13 +199,16 @@ do_shoot(State0, Requests0, Pending0, N, Channel) ->
         case greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}) of
             {ok, Stream} ->
                 shoot(Stream, Req, State1, [ReplyTo]);
-            _Err ->
-                State0
+            Error ->
+                reply(ReplyTo, Error),
+                State1
+
         end
     catch
         E:R:S ->
             logger:error("[GreptimeDB] failed to shoot(pending=~0p,channel=~0p): ~0p ~0p ~p", [N, Channel, E, R, S]),
-            State0
+            reply(ReplyTo, R),
+            State1
     end.
 
 
