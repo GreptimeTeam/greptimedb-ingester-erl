@@ -43,12 +43,12 @@ write_request(Stream, Request) ->
     end.
 
 %% @doc Finish the gRPC stream and wait the result.
--spec finish(Stream :: map()) -> {ok, term()} | {error, term()}.
+-spec finish(Stream :: map()) -> {ok, term()} | {error, term(), term()} | timeout | stream_finished.
 finish(Stream) ->
     finish(Stream, 10_000).
 
 %% @doc Finish the gRPC stream and wait the result with timeout in milliseconds.
--spec finish(Stream :: map(), Timeout :: integer()) -> {ok, term()} | {error, term()}.
+-spec finish(Stream :: map(), Timeout :: integer()) -> {ok, term()} | {error, term(), term()} | timeout | stream_finished.
 finish(Stream, Timeout) ->
     try
         ok = grpcbox_client:close_send(Stream),

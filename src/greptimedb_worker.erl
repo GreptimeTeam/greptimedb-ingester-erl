@@ -204,12 +204,12 @@ shoot(Stream, ?REQ(Req, _), #state{requests = #{pending_count := 0}} = State, Re
     case greptimedb_stream:write_request(Stream, Req) of
         ok ->
             Result =  case greptimedb_stream:finish(Stream) of
-                          {ok, Resp, _} ->
+                          {ok, Resp} ->
                               {ok, Resp};
                           {error, {?GRPC_STATUS_UNAUTHENTICATED, Msg}, Other} ->
                               {error, {unauth, Msg, Other}};
                           Err ->
-                              Err
+                              {error, Err}
                       end,
 
             lists:foreach(fun(ReplyTo) ->
