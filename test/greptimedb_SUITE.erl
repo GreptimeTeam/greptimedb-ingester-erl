@@ -163,7 +163,22 @@ t_auth_error(_) ->
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"wrong_pwd">>}}}],
     {ok, Client} = greptimedb:start_client(Options),
+
+    %% sync write
     {error, {unauth, _, _}} = greptimedb:write(Client, Metric, Points),
+    %% async write
+    Ref = make_ref(),
+    TestPid = self(),
+    ResultCallback = {fun(Reply) -> TestPid ! {{Ref, reply}, Reply} end, []},
+
+    ok = greptimedb:async_write(Client, Metric, Points, ResultCallback),
+    receive
+        {{Ref, reply}, {error, {unauth, _, _}}} ->
+            ok;
+        {{Ref, reply}, _Other} ->
+            ?assert(false)
+    end,
+
     greptimedb:stop_client(Client),
     ok.
 
