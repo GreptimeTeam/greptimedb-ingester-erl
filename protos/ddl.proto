@@ -1,3 +1,17 @@
+// Copyright 2023 Greptime Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 syntax = "proto3";
 
 package greptime.v1;
@@ -6,10 +20,11 @@ option java_package = "io.greptime.v1";
 option java_outer_classname = "Ddl";
 option go_package = "github.com/GreptimeTeam/greptime-proto/go/greptime/v1";
 
-import "protos/column.proto";
+import "protos/common.proto";
 
-// "Data Definition Language" requests, that create, modify or delete the database structures but not the data.
-// `DdlRequest` could carry more information than plain SQL, for example, the "table_id" in `CreateTableExpr`.
+// "Data Definition Language" requests, that create, modify or delete the
+// database structures but not the data. `DdlRequest` could carry more
+// information than plain SQL, for example, the "table_id" in `CreateTableExpr`.
 // So create a new DDL expr if you need it.
 message DdlRequest {
   oneof expr {
@@ -17,7 +32,7 @@ message DdlRequest {
     CreateTableExpr create_table = 2;
     AlterExpr alter = 3;
     DropTableExpr drop_table = 4;
-    FlushTableExpr flush_table = 5;
+    TruncateTableExpr truncate_table = 7;
   }
 }
 
@@ -32,7 +47,6 @@ message CreateTableExpr {
   bool create_if_not_exists = 8;
   map<string, string> table_options = 9;
   TableId table_id = 10;
-  repeated uint32 region_ids = 11;
   string engine = 12;
 }
 
@@ -51,42 +65,54 @@ message DropTableExpr {
   string catalog_name = 1;
   string schema_name = 2;
   string table_name = 3;
-}
-
-message FlushTableExpr {
-  string catalog_name = 1;
-  string schema_name = 2;
-  string table_name = 3;
-  optional uint32 region_id = 4;
+  TableId table_id = 4;
+  bool drop_if_exists = 5;
 }
 
 message CreateDatabaseExpr {
-  //TODO(hl): maybe rename to schema_name?
   string database_name = 1;
   bool create_if_not_exists = 2;
+  map<string, string> options = 3;
 }
 
-message AddColumns {
-  repeated AddColumn add_columns = 1;
+message TruncateTableExpr {
+  string catalog_name = 1;
+  string schema_name = 2;
+  string table_name = 3;
+  TableId table_id = 4;
 }
 
-message DropColumns {
-  repeated DropColumn drop_columns = 1;
-}
+message AddColumns { repeated AddColumn add_columns = 1; }
 
-message RenameTable {
-  string new_table_name = 1;
-}
+message DropColumns { repeated DropColumn drop_columns = 1; }
+
+message RenameTable { string new_table_name = 1; }
 
 message AddColumn {
   ColumnDef column_def = 1;
-  bool is_key = 2;
+  AddColumnLocation location = 3;
 }
 
-message DropColumn {
+message DropColumn { string name = 1; }
+
+message TableId { uint32 id = 1; }
+
+message ColumnDef {
   string name = 1;
+  ColumnDataType data_type = 2;
+  bool is_nullable = 3;
+  bytes default_constraint = 4;
+  SemanticType semantic_type = 5;
+  string comment = 6;
+  // Extension for ColumnDataType.
+  ColumnDataTypeExtension datatype_extension = 7;
 }
 
-message TableId {
-  uint32 id = 1;
+message AddColumnLocation {
+  enum LocationType {
+    FIRST = 0;
+    AFTER = 1;
+  }
+  LocationType location_type = 1;
+  string after_column_name = 2;
 }

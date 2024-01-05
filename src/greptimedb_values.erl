@@ -51,13 +51,13 @@ datetime_value(V) ->
     #{values => #{datetime_values => [V]}, datatype => 'DATETIME'}.
 
 timestamp_second_value(V) ->
-    #{values => #{ts_second_values => [V]}, datatype => 'TIMESTAMP_SECOND'}.
+    #{values => #{timestamp_second_values => [V]}, datatype => 'TIMESTAMP_SECOND'}.
 
 timestamp_millisecond_value(V) ->
-    #{values => #{ts_millisecond_values => [V]}, datatype => 'TIMESTAMP_MILLISECOND'}.
+    #{values => #{timestamp_millisecond_values => [V]}, datatype => 'TIMESTAMP_MILLISECOND'}.
 
 timestamp_microsecond_value(V) ->
-    #{values => #{ts_microsecond_values => [V]}, datatype => 'TIMESTAMP_MICROSECOND'}.
+    #{values => #{timestamp_microsecond_values => [V]}, datatype => 'TIMESTAMP_MICROSECOND'}.
 
 timestamp_nanosecond_value(V) ->
-    #{values => #{ts_nanosecond_values => [V]}, datatype => 'TIMESTAMP_NANOSECOND'}.
+    #{values => #{timestamp_nanosecond_values => [V]}, datatype => 'TIMESTAMP_NANOSECOND'}.

@@ -101,7 +101,7 @@ t_insert_requests(_) ->
                 lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end,
                              Columns),
             ?assertEqual([1619775142098, 1619775143098, 1619775144098],
-                         maps:get(ts_second_values, maps:get(values, TimestampColumn)));
+                         maps:get(timestamp_second_values, maps:get(values, TimestampColumn)));
         _ ->
             ?assert(false)
     end,

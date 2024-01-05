@@ -20,14 +20,10 @@ option java_package = "io.greptime.v1";
 option java_outer_classname = "Columns";
 option go_package = "github.com/GreptimeTeam/greptime-proto/go/greptime/v1";
 
+import "protos/common.proto";
+
 message Column {
   string column_name = 1;
-
-  enum SemanticType {
-    TAG = 0;
-    FIELD = 1;
-    TIMESTAMP = 2;
-  }
   SemanticType semantic_type = 2;
 
   message Values {
@@ -50,10 +46,22 @@ message Column {
 
     repeated int32 date_values = 14;
     repeated int64 datetime_values = 15;
-    repeated int64 ts_second_values = 16;
-    repeated int64 ts_millisecond_values = 17;
-    repeated int64 ts_microsecond_values = 18;
-    repeated int64 ts_nanosecond_values = 19;
+    repeated int64 timestamp_second_values = 16;
+    repeated int64 timestamp_millisecond_values = 17;
+    repeated int64 timestamp_microsecond_values = 18;
+    repeated int64 timestamp_nanosecond_values = 19;
+    repeated int64 time_second_values = 20;
+    repeated int64 time_millisecond_values = 21;
+    repeated int64 time_microsecond_values = 22;
+    repeated int64 time_nanosecond_values = 23;
+    repeated int32 interval_year_month_values = 24;
+    repeated int64 interval_day_time_values = 25;
+    repeated IntervalMonthDayNano interval_month_day_nano_values = 26;
+    repeated int64 duration_second_values = 27;
+    repeated int64 duration_millisecond_values = 28;
+    repeated int64 duration_microsecond_values = 29;
+    repeated int64 duration_nanosecond_values = 30;
+    repeated Decimal128 decimal128_values = 31;
   }
   // The array of non-null values in this column.
   //
@@ -73,33 +81,7 @@ message Column {
 
   // Helpful in creating vector from column.
   ColumnDataType datatype = 5;
-}
 
-message ColumnDef {
-  string name = 1;
-  ColumnDataType datatype = 2;
-  bool is_nullable = 3;
-  bytes default_constraint = 4;
-}
-
-enum ColumnDataType {
-  BOOLEAN = 0;
-  INT8 = 1;
-  INT16 = 2;
-  INT32 = 3;
-  INT64 = 4;
-  UINT8 = 5;
-  UINT16 = 6;
-  UINT32 = 7;
-  UINT64 = 8;
-  FLOAT32 = 9;
-  FLOAT64 = 10;
-  BINARY = 11;
-  STRING = 12;
-  DATE = 13;
-  DATETIME = 14;
-  TIMESTAMP_SECOND = 15;
-  TIMESTAMP_MILLISECOND = 16;
-  TIMESTAMP_MICROSECOND = 17;
-  TIMESTAMP_NANOSECOND = 18;
+  // Extension for ColumnDataType.
+  ColumnDataTypeExtension datatype_extension = 6;
 }

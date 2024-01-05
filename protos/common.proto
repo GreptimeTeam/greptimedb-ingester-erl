@@ -20,8 +20,6 @@ option java_package = "io.greptime.v1";
 option java_outer_classname = "Common";
 option go_package = "github.com/GreptimeTeam/greptime-proto/go/greptime/v1";
 
-message ResponseHeader {}
-
 message RequestHeader {
   // The `catalog` that is selected to be used in this request.
   string catalog = 1;
@@ -31,6 +29,17 @@ message RequestHeader {
   AuthHeader authorization = 3;
   // The `dbname` for the request
   string dbname = 4;
+  // Encoded trace_id & span_id, follow the w3c Trace Context
+  // https://www.w3.org/TR/trace-context/#header-name
+  map<string, string> tracing_context = 5;
+}
+
+message ResponseHeader { Status status = 1; }
+
+message Status {
+  // Corresponding to the `StatusCode` definition of GreptimeDB
+  uint32 status_code = 1;
+  string err_msg = 2;
 }
 
 message AuthHeader {
@@ -50,3 +59,67 @@ message Token { string token = 1; }
 message AffectedRows { uint32 value = 1; }
 
 message FlightMetadata { AffectedRows affected_rows = 1; }
+
+enum SemanticType {
+  TAG = 0;
+  FIELD = 1;
+  TIMESTAMP = 2;
+}
+
+enum ColumnDataType {
+  BOOLEAN = 0;
+  INT8 = 1;
+  INT16 = 2;
+  INT32 = 3;
+  INT64 = 4;
+  UINT8 = 5;
+  UINT16 = 6;
+  UINT32 = 7;
+  UINT64 = 8;
+  FLOAT32 = 9;
+  FLOAT64 = 10;
+  BINARY = 11;
+  STRING = 12;
+  DATE = 13;
+  DATETIME = 14;
+  TIMESTAMP_SECOND = 15;
+  TIMESTAMP_MILLISECOND = 16;
+  TIMESTAMP_MICROSECOND = 17;
+  TIMESTAMP_NANOSECOND = 18;
+  TIME_SECOND = 19;
+  TIME_MILLISECOND = 20;
+  TIME_MICROSECOND = 21;
+  TIME_NANOSECOND = 22;
+  INTERVAL_YEAR_MONTH = 23;
+  INTERVAL_DAY_TIME = 24;
+  INTERVAL_MONTH_DAY_NANO = 25;
+  DURATION_SECOND = 26;
+  DURATION_MILLISECOND = 27;
+  DURATION_MICROSECOND = 28;
+  DURATION_NANOSECOND = 29;
+  DECIMAL128 = 30;
+}
+
+message IntervalMonthDayNano {
+  int32 months = 1;
+  int32 days = 2;
+  int64 nanoseconds = 3;
+}
+
+// (hi: high 64 bits, lo: low 64 bits) are used to keep the decimal128 value.
+message Decimal128 {
+  int64 hi = 1;
+  int64 lo = 2;
+}
+
+// Type extension for some complex types
+message ColumnDataTypeExtension {
+  oneof type_ext {
+    DecimalTypeExtension decimal_type = 1;
+  }
+}
+
+message DecimalTypeExtension {
+  int32 precision = 1;
+  int32 scale = 2;
+}
