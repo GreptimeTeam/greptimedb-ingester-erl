@@ -92,13 +92,13 @@ values_size(#{string_values := Values}) ->
     length(Values);
 values_size(#{date_values := Values}) ->
     length(Values);
-values_size(#{ts_second_values := Values}) ->
+values_size(#{timestamp_second_values := Values}) ->
     length(Values);
-values_size(#{ts_millisecond_values := Values}) ->
+values_size(#{timestamp_millisecond_values := Values}) ->
     length(Values);
-values_size(#{ts_microsecond_values := Values}) ->
+values_size(#{timestamp_microsecond_values := Values}) ->
     length(Values);
-values_size(#{ts_nanosecond_values := Values}) ->
+values_size(#{timestamp_nanosecond_values := Values}) ->
     length(Values).
 
 merge_values(#{i8_values := V1} = L, #{i8_values := V2}) ->
@@ -129,14 +129,14 @@ merge_values(#{string_values := V1} = L, #{string_values := V2}) ->
     L#{string_values := [V2 | V1]};
 merge_values(#{date_values := V1} = L, #{date_values := V2}) ->
     L#{date_values := [V2 | V1]};
-merge_values(#{ts_second_values := V1} = L, #{ts_second_values := V2}) ->
-    L#{ts_second_values := [V2 | V1]};
-merge_values(#{ts_millisecond_values := V1} = L, #{ts_millisecond_values := V2}) ->
-    L#{ts_millisecond_values := [V2 | V1]};
-merge_values(#{ts_microsecond_values := V1} = L, #{ts_microsecond_values := V2}) ->
-    L#{ts_microsecond_values := [V2 | V1]};
-merge_values(#{ts_nanosecond_values := V1} = L, #{ts_nanosecond_values := V2}) ->
-    L#{ts_nanosecond_values := [V2 | V1]};
+merge_values(#{timestamp_second_values := V1} = L, #{timestamp_second_values := V2}) ->
+    L#{timestamp_second_values := [V2 | V1]};
+merge_values(#{timestamp_millisecond_values := V1} = L, #{timestamp_millisecond_values := V2}) ->
+    L#{timestamp_millisecond_values := [V2 | V1]};
+merge_values(#{timestamp_microsecond_values := V1} = L, #{timestamp_microsecond_values := V2}) ->
+    L#{timestamp_microsecond_values := [V2 | V1]};
+merge_values(#{timestamp_nanosecond_values := V1} = L, #{timestamp_nanosecond_values := V2}) ->
+    L#{timestamp_nanosecond_values := [V2 | V1]};
 merge_values(V1, V2) when map_size(V1) == 0 ->
     V2.
 
