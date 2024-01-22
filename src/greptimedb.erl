@@ -17,10 +17,23 @@
 -export([start_client/1, stop_client/1, write_batch/2, write/3, write_stream/1,
          async_write/4, async_write_batch/3, is_alive/1, is_alive/2, ddl/1]).
 
+-export_type([metric/0, point/0, timeunit/0]).
+
+-type table() :: atom() | binary() | list().
+-type dbname() :: atom() | binary() | list().
+-type timeunit() :: ns | us| ms | s | nanosecond | microsecond | millisecond | second.
+-type metric() :: table()
+                | {dbname(), table()}
+                | #{dbname => dbname(), table := table(), timeunit => timeunit()}.
+-type point() :: #{tags => map(),
+                   fields => map(),
+                   timestamp => integer()}.
+
 -spec start_client(list()) ->
                       {ok, Client :: map()} |
                       {error, {already_started, Client :: map()}} |
                       {error, Reason :: term()}.
+
 start_client(Options0) ->
     Pool = proplists:get_value(pool, Options0),
     Options = lists:keydelete(protocol, 1, lists:keydelete(pool, 1, Options0)),
@@ -41,30 +54,15 @@ start_client(Options0) ->
 %% @doc Write points to the metric table, return the result.
 -spec write(Client, Metric, Points) -> {ok, term()} | {error, term()}
     when Client :: map(),
-         Metric :: Table | {DbName, Table},
-         DbName :: atom() | binary() | list(),
-         Table :: atom() | binary() | list(),
-         Points :: [Point],
-         Point ::
-             #{tags => map(),
-               fields => map(),
-               timestamp => integer()}.
+         Metric :: metric(),
+         Points :: [point()].
 write(Client, Metric, Points) ->
     write_batch(Client, [{Metric, Points}]).
 
 %% @doc Write a batch of data points to the database, return the result.
 -spec write_batch(Client, MetricAndPoints) -> {ok, term()} | {error, term()}
     when Client :: map(),
-         MetricAndPoints :: [MetricAndPoint],
-         MetricAndPoint :: {Metric, Points},
-         Metric :: Table | {DbName, Table},
-         DbName :: atom() | binary() | list(),
-         Table :: atom() | binary() | list(),
-         Points :: [Point],
-         Point ::
-             #{tags => map(),
-               fields => map(),
-               timestamp => integer()}.
+         MetricAndPoints :: [{metric(), [point()]}].
 write_batch(Client, MetricAndPoints) ->
     try
         Request = greptimedb_encoder:insert_requests(Client, MetricAndPoints),
@@ -89,14 +87,8 @@ write_stream(Client) ->
 %% @doc Send an async request to write points to the metric table. The callback is evaluated when an error happens or response is received.
 -spec async_write(Client, Metric, Points, ResultCallback) -> ok | {error, term()}
     when Client :: map(),
-         Metric :: Table | {DbName, Table},
-         DbName :: atom() | binary() | list(),
-         Table :: atom() | binary() | list(),
-         Points :: [Point],
-         Point ::
-             #{tags => map(),
-               fields => map(),
-               timestamp => integer()},
+         Metric :: metric(),
+         Points :: [point()],
          ResultCallback :: {function(), list()}.
 async_write(Client, Metric, Points, ResultCallback) ->
     async_write_batch(Client, [{Metric, Points}], ResultCallback).
@@ -104,16 +96,7 @@ async_write(Client, Metric, Points, ResultCallback) ->
 %% @doc Send a batch of async request. The callback is evaluated when an error happens or response is received.
 -spec async_write_batch(Client, MetricAndPoints, ResultCallback) -> ok | {error, term()}
     when Client :: map(),
-         MetricAndPoints :: [MetricAndPoint],
-         MetricAndPoint :: {Metric, Points},
-         Metric :: Table | {DbName, Table},
-         DbName :: atom() | binary() | list(),
-         Table :: atom() | binary() | list(),
-         Points :: [Point],
-         Point ::
-             #{tags => map(),
-               fields => map(),
-               timestamp => integer()},
+         MetricAndPoints ::  [{metric(), [point()]}],
          ResultCallback :: {function(), list()}.
 async_write_batch(Client, MetricAndPoints, ResultCallback) ->
     Request = greptimedb_encoder:insert_requests(Client, MetricAndPoints),
