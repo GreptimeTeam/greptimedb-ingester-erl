@@ -32,8 +32,8 @@ insert_requests(#{cli_opts := Options} = _Client, [], DbName, Inserts) ->
                 #{dbname => DbName, authorization => #{auth_scheme => Scheme}}
         end,
     #{header => Header, request => {inserts, #{inserts => Inserts}}};
-insert_requests(#{cli_opts := Options} = Client, [{Table, Points} | T], PrevDbName, Inserts) ->
-    {DbName, Insert} = insert_request(Options, Table, Points),
+insert_requests(#{cli_opts := Options} = Client, [{Metric, Points} | T], PrevDbName, Inserts) ->
+    {DbName, Insert} = insert_request(Options, metric(Options, Metric), Points),
     case PrevDbName of
         unknown ->
             insert_requests(Client, T, DbName, [Insert | Inserts]);
@@ -41,21 +41,35 @@ insert_requests(#{cli_opts := Options} = Client, [{Table, Points} | T], PrevDbNa
             insert_requests(Client, T, Name, [Insert | Inserts])
     end.
 
-insert_request(Options, {DbName, Table}, Points) ->
-    Timeunit = proplists:get_value(timeunit, Options, ms),
+insert_request(_Options, #{dbname := DbName, table := Table, timeunit := Timeunit}, Points) ->
     RowCount = length(Points),
-    Columns =
-        lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end, collect_columns(Timeunit, Points)),
+    Columns = lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end,
+                        collect_columns(Timeunit, Points)),
     {DbName,
      #{table_name => Table,
        columns => Columns,
-       row_count => RowCount}};
-insert_request(Options, Table, Points) ->
-    insert_request(Options, {?DEFAULT_DBNAME, Table}, Points).
+       row_count => RowCount}}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+metric(Options, Metric) ->
+    metric_with_default(default_metric(Options), Metric).
+
+default_metric(Options) ->
+    #{dbname => ?DEFAULT_DBNAME,
+      timeunit => proplists:get_value(timeunit, Options, ms)}.
+
+%% table is required
+metric_with_default(Default, #{table := _} = Metric) ->
+    maps:merge(Default, Metric);
+%% backward compatibility
+metric_with_default(Default, {DbName, Table}) ->
+    Default#{dbname => DbName, table => Table};
+metric_with_default(Default, Table) when is_atom(Table); is_list(Table); is_binary(Table) ->
+    Default#{table => Table}.
+
 collect_columns(Timeunit, Points) ->
     collect_columns(Timeunit, Points, []).
 

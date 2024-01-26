@@ -9,6 +9,7 @@ all() ->
     [t_write,
      t_write_stream,
      t_insert_requests,
+     t_insert_requests_with_timeunit,
      t_write_failure,
      t_write_batch,
      t_bench_perf,
@@ -106,6 +107,26 @@ t_insert_requests(_) ->
             ?assert(false)
     end,
     ok.
+
+t_insert_requests_with_timeunit(_) ->
+    TsNano = 1705946037724448346,
+    Points = [#{fields => #{<<"temperature">> => 1},
+                tags =>
+                    #{<<"from">> => <<"mqttx_4b963a8e">>,
+                      <<"host">> => <<"serverA">>,
+                      <<"qos">> => "0",
+                      <<"device">> => <<"NO.1">>,
+                      <<"region">> => <<"hangzhou">>},
+                timestamp => TsNano}],
+    AuthInfo = {basic, #{username => "test", password => "test"}},
+    Client = #{cli_opts => [{auth, AuthInfo}, {timeunit, second}]},
+    Metric = #{table => "Test", timeunit => nanosecond},
+    Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
+    #{header := #{dbname := _DbName, authorization := _Auth},
+      request := {inserts, #{inserts := [#{columns := Columns}]}}} = Request,
+    {value, TimestampColumn} =
+        lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end, Columns),
+    ?assertEqual([TsNano], maps:get(timestamp_nanosecond_values, maps:get(values, TimestampColumn))).
 
 t_write_failure(_) ->
     Metric = <<"temperatures">>,
