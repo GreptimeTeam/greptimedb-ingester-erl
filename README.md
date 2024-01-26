@@ -53,6 +53,24 @@ Write data by rows:
         greptimedb:write(Client, Metric, Points).
 ```
 
+Write data specifying `timeunit`:
+
+```erlang
+   Metric = #{table => <<"temperatures_nanosec">>,
+              timeunit => nanosecond},
+   Points =
+        [#{fields => #{<<"temperature">> => 1},
+           tags =>
+               #{<<"from">> => <<"mqttx_4b963a8e">>,
+                 <<"host">> => <<"serverA">>,
+                 <<"qos">> => greptimedb_values:int64_value(0),
+                 <<"region">> => <<"hangzhou">>},
+           timestamp => 1705946037724448346}],
+
+    {ok, #{response := {affected_rows, #{value := 1}}}} =
+        greptimedb:write(Client, Metric, Points).
+```
+
 Write in async:
 
 ```erlang
