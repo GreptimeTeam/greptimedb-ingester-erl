@@ -1,7 +1,7 @@
-greptimedb-client-erl
+greptimedb-ingester-erl
 =====
-![Tests](https://github.com/GreptimeTeam/greptimedb-client-erl/workflows/Erlang%20CI/badge.svg)
-[![Coverage Status](https://coveralls.io/repos/github/GreptimeTeam/greptimedb-client-erl/badge.svg?branch=main)](https://coveralls.io/github/GreptimeTeam/greptimedb-client-erl?branch=main)
+![Tests](https://github.com/GreptimeTeam/greptimedb-ingester-erl/workflows/Erlang%20CI/badge.svg)
+[![Coverage Status](https://coveralls.io/repos/github/GreptimeTeam/greptimedb-ingester-erl/badge.svg?branch=main)](https://coveralls.io/github/GreptimeTeam/greptimedb-ingester-erl?branch=main)
 
 An Erlang client library for [GreptimeDB](https://github.com/GreptimeTeam/greptimedb).
 
@@ -168,7 +168,7 @@ Write each row by `greptimedb:write/3` function. Every row contains:
 * `tags`: the metric tags, the default type is `STRING`.
 * `timestamp`: the metric timestamp, the default type is `TIMESTAMP_MILLISECOND`.
 
-Of course, you can write other types by using functions in [greptimedb_values](https://github.com/GreptimeTeam/greptimedb-client-erl/blob/main/src/greptimedb_values.erl).
+Of course, you can write other types by using functions in [greptimedb_values](https://github.com/GreptimeTeam/greptimedb-ingester-erl/blob/main/src/greptimedb_values.erl).
 
 
 ## Build and test
