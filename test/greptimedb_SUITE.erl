@@ -500,9 +500,10 @@ t_insert_greptime_cloud(_) ->
                 {pool_size, 5},
                 {pool_type, random},
                 {timeunit, ms},
+                {dbname, DbName},
                 {auth, {basic, #{username => UserName, password => PassWd}}}],
            {ok, Client} = greptimedb:start_client(Options),
-           Metric = {DbName, <<"temperatures">>},
+           Metric = <<"temperatures">>,
            Points =
                [#{fields => #{<<"temperature">> => 1},
                   tags =>

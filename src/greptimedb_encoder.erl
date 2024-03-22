@@ -58,7 +58,7 @@ metric(Options, Metric) ->
     metric_with_default(default_metric(Options), Metric).
 
 default_metric(Options) ->
-    #{dbname => ?DEFAULT_DBNAME,
+    #{dbname => proplists:get_value(dbname, Options, ?DEFAULT_DBNAME),
       timeunit => proplists:get_value(timeunit, Options, ms)}.
 
 %% table is required

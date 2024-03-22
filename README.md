@@ -143,6 +143,60 @@ Connect GreptimeDB with authentication:
     {ok, Client} = greptimedb:start_client(Options).
 ```
 
+## Write to GreptimeCloud
+
+[GreptimeCloud](https://greptime.com/product/cloud) is a fully-managed GreptimeDB as a service in the cloud.
+
+After you creating a service, you must have the following info via `connect`:
+* `Host` the service host to connect,
+* `Port`, gRPC port, default is `5001`,
+* `Database`, the database to write,
+* `Username`, the service username,
+* `Password`, the service password.
+
+Connect to GreptimeCloud with authentication:
+
+```erlang
+  Host = ...,
+  Database = ...,
+  Username = ...,
+  Password = ...,
+
+  Options =
+      [{endpoints, [{https, Host, 5001}]},
+       {pool, greptimedb_client_pool},
+       {pool_size, 5},
+       {pool_type, random},
+       {timeunit, ms},
+       {dbname, Database},
+       {auth, {basic, #{username => Username, password => Password }}}],
+
+  {ok, Client} = greptimedb:start_client(Options),
+
+  Metric = <"temperatures">>,
+  Points =
+      [#{fields => #{<<"temperature">> => 1},
+         tags =>
+             #{<<"from">> => <<"mqttx_4b963a8e">>,
+               <<"host">> => <<"serverA">>,
+               <<"qos">> => greptimedb_values:int64_value(0),
+               <<"region">> => <<"hangzhou">>},
+         timestamp => 1619775142098},
+       #{fields => #{<<"temperature">> => 2},
+         tags =>
+             #{<<"from">> => <<"mqttx_4b963a8e">>,
+               <<"host">> => <<"serverB">>,
+               <<"qos">> => greptimedb_values:int64_value(1),
+               <<"region">> => <<"ningbo">>,
+               <<"to">> => <<"kafka">>},
+         timestamp => 1619775143098}],
+
+  greptimedb:write(Client, Metric, Points).
+
+```
+
+We change the endpoint scheme from `http` to `https` and set the `dbname` option.
+
 ## APIs guide
 
 ### Client options
@@ -159,6 +213,7 @@ A proper list contains:
     * `us` or `microsecond`
     * `ms` or `millisecond`
     * `s` or `second`
+* `dbname`: the default database to write, `public` by default. Change it to the servce database name when connecting to GreptimeCloud.
 
 ### Write and datatypes
 The metric name can be a string or binary. If you want to set the database, the metric name can be set in the form of `{dbname, metric}`. The data will be written into `greptime-public` by default.
