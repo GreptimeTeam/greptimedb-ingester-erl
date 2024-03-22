@@ -50,9 +50,11 @@
 init(Args) ->
     logger:debug("[GreptimeDB] genserver has started (~w)~n", [self()]),
     Endpoints = proplists:get_value(endpoints, Args),
+    SslOptions = proplists:get_value(ssl_opts, Args, []),
     Options = proplists:get_value(grpc_options, Args, #{connect_timeout => ?CONNECT_TIMEOUT}),
     Channels =
-        lists:map(fun({Schema, Host, Port}) -> {Schema, Host, Port, []} end, Endpoints),
+        lists:map(fun({Scheme, Host, Port}) -> {Scheme, Host, Port, ssl_options(Scheme, SslOptions)}
+                  end, Endpoints),
     Channel = list_to_atom(pid_to_list(self())),
     {ok, _} = grpcbox_channel_sup:start_child(Channel, Channels, Options),
     {ok, #state{channel = Channel, requests = #{ pending => queue:new(), pending_count => 0}}}.
@@ -60,6 +62,7 @@ init(Args) ->
 handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
     Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
     Reply = greptime_v_1_greptime_database_client:handle(Ctx, Request, #{channel => Channel}),
+    logger:debug("[GreptimeDB] handle_call reply: ~w~n", [Reply]),
     case Reply of
         {ok, Resp, _} ->
             {reply, {ok, Resp}, State};
@@ -113,6 +116,19 @@ terminate(Reason, #state{channel = Channel} = State) ->
 %%%===================================================================
 %%% Helper functions
 %%%===================================================================
+ssl_options(https, []) ->
+    %% https://www.erlang.org/doc/man/ssl#type-client_option
+    [
+     {verify, verify_peer},
+     {cacerts, public_key:cacerts_get()},
+     %% hostname may be wildcard
+     {customize_hostname_check, [{match_fun,public_key:pkix_verify_hostname_match_fun(https)}]}
+    ];
+
+ssl_options(_, SslOptions) ->
+    SslOptions.
+
+
 now_() ->
     erlang:system_time(millisecond).
 

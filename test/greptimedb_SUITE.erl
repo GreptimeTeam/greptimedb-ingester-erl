@@ -15,6 +15,7 @@ all() ->
      t_bench_perf,
      t_write_stream,
      t_async_write_batch,
+     t_insert_greptime_cloud,
      t_auth_error].
 
 %%[t_bench_perf].
@@ -110,23 +111,26 @@ t_insert_requests(_) ->
 
 t_insert_requests_with_timeunit(_) ->
     TsNano = 1705946037724448346,
-    Points = [#{fields => #{<<"temperature">> => 1},
-                tags =>
-                    #{<<"from">> => <<"mqttx_4b963a8e">>,
-                      <<"host">> => <<"serverA">>,
-                      <<"qos">> => "0",
-                      <<"device">> => <<"NO.1">>,
-                      <<"region">> => <<"hangzhou">>},
-                timestamp => TsNano}],
+    Points =
+        [#{fields => #{<<"temperature">> => 1},
+           tags =>
+               #{<<"from">> => <<"mqttx_4b963a8e">>,
+                 <<"host">> => <<"serverA">>,
+                 <<"qos">> => "0",
+                 <<"device">> => <<"NO.1">>,
+                 <<"region">> => <<"hangzhou">>},
+           timestamp => TsNano}],
     AuthInfo = {basic, #{username => "test", password => "test"}},
     Client = #{cli_opts => [{auth, AuthInfo}, {timeunit, second}]},
     Metric = #{table => "Test", timeunit => nanosecond},
     Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
     #{header := #{dbname := _DbName, authorization := _Auth},
-      request := {inserts, #{inserts := [#{columns := Columns}]}}} = Request,
+      request := {inserts, #{inserts := [#{columns := Columns}]}}} =
+        Request,
     {value, TimestampColumn} =
         lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end, Columns),
-    ?assertEqual([TsNano], maps:get(timestamp_nanosecond_values, maps:get(values, TimestampColumn))).
+    ?assertEqual([TsNano],
+                 maps:get(timestamp_nanosecond_values, maps:get(values, TimestampColumn))).
 
 t_write_failure(_) ->
     Metric = <<"temperatures">>,
@@ -477,3 +481,46 @@ t_async_write_batch(_) ->
 
     greptimedb:stop_client(Client),
     ok.
+
+t_insert_greptime_cloud(_) ->
+    Host = os:getenv("GT_TEST_HOST"),
+    DbName = os:getenv("GT_TEST_DB"),
+    UserName = os:getenv("GT_TEST_USER"),
+    PassWd = os:getenv("GT_TEST_PASSWD"),
+
+    if (Host == false) or (DbName == false) or (UserName == false) or (PassWd == false) ->
+           ct:print("Ignored t_insert_greptime_cloud..."),
+           ok;
+       true ->
+           ct:print("Running t_insert_greptime_cloud..."),
+           %% the endpoint scheme must be `https`.
+           Options =
+               [{endpoints, [{https, Host, 5001}]},
+                {pool, greptimedb_client_pool},
+                {pool_size, 5},
+                {pool_type, random},
+                {timeunit, ms},
+                {auth, {basic, #{username => UserName, password => PassWd}}}],
+           {ok, Client} = greptimedb:start_client(Options),
+           Metric = {DbName, <<"temperatures">>},
+           Points =
+               [#{fields => #{<<"temperature">> => 1},
+                  tags =>
+                      #{<<"from">> => <<"mqttx_4b963a8e">>,
+                        <<"host">> => <<"serverA">>,
+                        <<"qos">> => greptimedb_values:int64_value(0),
+                        <<"region">> => <<"hangzhou">>},
+                  timestamp => 1619775142098},
+                #{fields => #{<<"temperature">> => 2},
+                  tags =>
+                      #{<<"from">> => <<"mqttx_4b963a8e">>,
+                        <<"host">> => <<"serverB">>,
+                        <<"qos">> => greptimedb_values:int64_value(1),
+                        <<"region">> => <<"ningbo">>,
+                        <<"to">> => <<"kafka">>},
+                  timestamp => 1619775143098}],
+           {ok, #{response := {affected_rows, #{value := 2}}}} =
+               greptimedb:write(Client, Metric, Points),
+           greptimedb:stop_client(Client),
+           ok
+    end.
