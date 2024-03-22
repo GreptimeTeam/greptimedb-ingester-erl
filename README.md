@@ -1,7 +1,7 @@
 greptimedb-ingester-erl
 =====
-![Tests](https://github.com/GreptimeTeam/greptimedb-ingester-erl/workflows/Erlang%20CI/badge.svg)
-[![Coverage Status](https://coveralls.io/repos/github/GreptimeTeam/greptimedb-ingester-erl/badge.svg?branch=main)](https://coveralls.io/github/GreptimeTeam/greptimedb-ingester-erl?branch=main)
+![Tests](https://github.com/GreptimeTeam/greptimedb-client-erl/workflows/Erlang%20CI/badge.svg)
+[![Coverage Status](https://coveralls.io/repos/github/GreptimeTeam/greptimedb-client-erl/badge.svg?branch=main)](https://coveralls.io/github/GreptimeTeam/greptimedb-client-erl?branch=main)
 
 An Erlang client library for [GreptimeDB](https://github.com/GreptimeTeam/greptimedb).
 
@@ -151,7 +151,7 @@ A proper list contains:
 
 * `endpoints`: List of the GreptimeDB server address in the form of `{http, host, port}`
 * `pool`, `pool_size` etc.: the client pool settings
-* `gprc_options`: grpxbox [client options](https://github.com/tsloughter/grpcbox#defining-channels)
+* `grpc_options`: grpxbox [client options](https://github.com/tsloughter/grpcbox#defining-channels)
 * `auth`:  authentication options,  `{auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}` for example.
 * `timeunit`: Timestamp unit, supports:
     * `ns` or `nanosecond`

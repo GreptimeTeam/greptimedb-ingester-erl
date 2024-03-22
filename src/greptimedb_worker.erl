@@ -50,7 +50,7 @@
 init(Args) ->
     logger:debug("[GreptimeDB] genserver has started (~w)~n", [self()]),
     Endpoints = proplists:get_value(endpoints, Args),
-    Options = proplists:get_value(gprc_options, Args, #{connect_timeout => ?CONNECT_TIMEOUT}),
+    Options = proplists:get_value(grpc_options, Args, #{connect_timeout => ?CONNECT_TIMEOUT}),
     Channels =
         lists:map(fun({Schema, Host, Port}) -> {Schema, Host, Port, []} end, Endpoints),
     Channel = list_to_atom(pid_to_list(self())),
