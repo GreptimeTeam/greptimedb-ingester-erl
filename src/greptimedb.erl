@@ -182,5 +182,7 @@ rpc_write_stream(#{pool := Pool, cli_opts := Options} = _Client) ->
 
 maybe_return_reason({error, Reason}, true) ->
     {false, Reason};
+maybe_return_reason(Error, true) ->
+    {false, Error};
 maybe_return_reason(_, _) ->
     false.
