@@ -5,7 +5,6 @@ greptimedb-ingester-erl
 
 An Erlang client library for [GreptimeDB](https://github.com/GreptimeTeam/greptimedb).
 
-> **_NOTE:_** GreptimeDB and this project is under heavy development. Do not use it in production at the moment.
 >  0.1.0: only working for GreptimeDB 0.2, otherwise for the latest GreptimeDB releases.
 
 ## Usage
