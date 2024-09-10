@@ -33,6 +33,7 @@
 -define(CALL_TIMEOUT, 12_000).
 -define(HEALTH_CHECK_TIMEOUT, 1_000).
 -define(REQUEST_TIMEOUT, 10_000).
+-define(GTDB_HINT_HEADER_PREFIX, <<"x-greptime-hint-">>).
 -define(CONNECT_TIMEOUT, 5_000).
 -define(ASYNC_BATCH_SIZE, 100).
 -define(ASYNC_BATCH_TIMEOUT, 100).
@@ -52,7 +53,7 @@ init(Args) ->
     Endpoints = proplists:get_value(endpoints, Args),
     Hints0 = proplists:get_value(grpc_hints, Args, #{}),
     Hints = maps:fold(fun(Key, Value, Acc) ->
-                              Acc#{ <<"x-greptime-hint-", Key/binary>> => Value}
+                              Acc#{<<?GTDB_HINT_HEADER_PREFIX/binary, Key/binary>> => Value}
                       end, #{}, Hints0),
     SslOptions = proplists:get_value(ssl_opts, Args, []),
     Options = proplists:get_value(grpc_opts, Args, #{connect_timeout => ?CONNECT_TIMEOUT}),

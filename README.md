@@ -130,6 +130,12 @@ Stop the client:
     greptimedb:stop_client(Client).
 ```
 
+Check if the client is alive:
+
+```erlang
+    true = greptimedb:is_alive(Client),
+```
+
 Connect GreptimeDB with authentication:
 
 ```erlang
