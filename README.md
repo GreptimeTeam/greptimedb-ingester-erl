@@ -22,6 +22,7 @@ Start the client:
       [{endpoints, [{http, "localhost", 4001}]},
        {pool, greptimedb_client_pool},
        {pool_size, 5},
+       {grpc_hints, #{}},
        {pool_type, random},
        {timeunit, ms}].
     {ok, Client} = greptimedb:start_client(Options).
@@ -129,6 +130,12 @@ Stop the client:
     greptimedb:stop_client(Client).
 ```
 
+Check if the client is alive:
+
+```erlang
+    true = greptimedb:is_alive(Client),
+```
+
 Connect GreptimeDB with authentication:
 
 ```erlang
@@ -205,6 +212,12 @@ A proper list contains:
 * `endpoints`: List of the GreptimeDB server address in the form of `{http, host, port}`
 * `pool`, `pool_size` etc.: the client pool settings
 * `grpc_opts`: grpxbox [client options](https://github.com/tsloughter/grpcbox#defining-channels)
+* `grpc_hints`: a map for GreptimeDB gRPC insertion hints, for example`#{ <<"append_mode">> => <<"true">> }` to enable append mode when creating tables automatically. Valid hints include:
+    * `append_mode`: `true` or `false` to enable append mode, default is `false`,
+    * `ttl`: time to live, the table `ttl` option,
+    * `merge_mode`:  `last_row` or `last_non_null`, default is `last_row`,
+    * `auto_create_table`: `true` or `false`, whether to create tables automatically when writing data, default is `false`,
+    * More about these table options, please read the [doc](https://docs.greptime.com/reference/sql/create/#table-options).
 * `ssl_opts`: when the endpoint scheme is `https`, the ssl options to use(`[]` by default).
 * `auth`:  authentication options,  `{auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}` for example.
 * `timeunit`: Timestamp unit, supports:
