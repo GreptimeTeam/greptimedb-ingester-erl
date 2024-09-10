@@ -24,7 +24,7 @@
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, async_handle/3]).
 -export([connect/1]).
 
--record(state, {channel, requests}).
+-record(state, {channel, requests, hints}).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -50,6 +50,10 @@
 init(Args) ->
     logger:debug("[GreptimeDB] genserver has started (~w)~n", [self()]),
     Endpoints = proplists:get_value(endpoints, Args),
+    Hints0 = proplists:get_value(grpc_hints, Args, #{}),
+    Hints = maps:fold(fun(Key, Value, Acc) ->
+                              Acc#{ <<"x-greptime-hint-", Key/binary>> => Value}
+                      end, #{}, Hints0),
     SslOptions = proplists:get_value(ssl_opts, Args, []),
     Options = proplists:get_value(grpc_opts, Args, #{connect_timeout => ?CONNECT_TIMEOUT}),
     Channels =
@@ -57,10 +61,10 @@ init(Args) ->
                   end, Endpoints),
     Channel = list_to_atom(pid_to_list(self())),
     {ok, _} = grpcbox_channel_sup:start_child(Channel, Channels, Options),
-    {ok, #state{channel = Channel, requests = #{ pending => queue:new(), pending_count => 0}}}.
+    {ok, #state{channel = Channel, hints = Hints, requests = #{ pending => queue:new(), pending_count => 0}}}.
 
-handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
-    Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
+handle_call({handle, Request}, _From, #state{channel = Channel, hints = Hints} = State) ->
+    Ctx = new_ctx(?REQUEST_TIMEOUT, Hints),
     Reply = greptime_v_1_greptime_database_client:handle(Ctx, Request, #{channel => Channel}),
     logger:debug("[GreptimeDB] handle_call reply: ~w~n", [Reply]),
     case Reply of
@@ -71,9 +75,9 @@ handle_call({handle, Request}, _From, #state{channel = Channel} = State) ->
         Err ->
             {reply, Err, State}
     end;
-handle_call(health_check, _From, #state{channel = Channel} = State) ->
+handle_call(health_check, _From, #state{channel = Channel, hints = Hints} = State) ->
     Request = #{},
-    Ctx = ctx:with_deadline_after(?HEALTH_CHECK_TIMEOUT, millisecond),
+    Ctx = new_ctx(?HEALTH_CHECK_TIMEOUT, Hints),
     Reply =
         greptime_v_1_health_check_client:health_check(Ctx, Request, #{channel => Channel}),
     case Reply of
@@ -128,6 +132,9 @@ ssl_options(https, []) ->
 ssl_options(_, SslOptions) ->
     SslOptions.
 
+new_ctx(TimeoutMs, Values) ->
+    Ctx0 = ctx:with_values(#{md_outgoing_key => Values}),
+    ctx:with_deadline_after(Ctx0, TimeoutMs, millisecond).
 
 now_() ->
     erlang:system_time(millisecond).
@@ -206,11 +213,11 @@ do_shoot(#state{requests = #{pending := Pending0, pending_count := N} = Requests
 do_shoot(State, _Force) ->
     State.
 
-do_shoot(State0, Requests0, Pending0, N, Channel) ->
+do_shoot(#state{hints = Hints} = State0, Requests0, Pending0, N, Channel) ->
     {{value, ?PEND_REQ(ReplyTo, Req)}, Pending} = queue:out(Pending0),
     Requests = Requests0#{pending := Pending, pending_count := N - 1},
     State1 = State0#state{requests = Requests},
-    Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
+    Ctx = new_ctx(?REQUEST_TIMEOUT, Hints),
     try
         case greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}) of
             {ok, Stream} ->
@@ -226,7 +233,6 @@ do_shoot(State0, Requests0, Pending0, N, Channel) ->
             reply(ReplyTo, R),
             State1
     end.
-
 
 shoot(Stream, ?REQ(Req, _), #state{requests = #{pending_count := 0}} = State, ReplyToList) ->
     %% Write the last request and finish stream

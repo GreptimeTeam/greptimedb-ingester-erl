@@ -200,6 +200,8 @@ t_write(_) ->
         [{endpoints, [{http, "localhost", 4001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 5},
+         %% enable append mode
+         {grpc_hints, #{<<"append_mode">> => <<"true">>}},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
 

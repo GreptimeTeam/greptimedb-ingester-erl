@@ -22,6 +22,7 @@ Start the client:
       [{endpoints, [{http, "localhost", 4001}]},
        {pool, greptimedb_client_pool},
        {pool_size, 5},
+       {grpc_hints, #{}},
        {pool_type, random},
        {timeunit, ms}].
     {ok, Client} = greptimedb:start_client(Options).
@@ -205,6 +206,7 @@ A proper list contains:
 * `endpoints`: List of the GreptimeDB server address in the form of `{http, host, port}`
 * `pool`, `pool_size` etc.: the client pool settings
 * `grpc_opts`: grpxbox [client options](https://github.com/tsloughter/grpcbox#defining-channels)
+* `grpc_hints`: a map for GreptimeDB gRPC insertion hints, for example`#{ <<"append_mode">> => <<"true">> }` to enable append mode when creating tables automatically.
 * `ssl_opts`: when the endpoint scheme is `https`, the ssl options to use(`[]` by default).
 * `auth`:  authentication options,  `{auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}` for example.
 * `timeunit`: Timestamp unit, supports:
