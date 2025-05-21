@@ -242,20 +242,39 @@ Of course, you can write other types by using functions in [greptimedb_values](h
 ## Build and test
 
 Build:
-
-    $ rebar3 compile
+```bash
+rebar3 compile
+```
 
 Test:
 
-    $ rebar3 do ct,eunit
+Start the GreptimeDB:
+
+```bash
+docker run -p 127.0.0.1:4000-4003:4000-4003 \
+  -v "$(pwd)/greptimedb:/greptimedb_data" \
+  --name greptime --rm \
+  greptime/greptimedb:latest standalone start \
+  --http-addr 0.0.0.0:4000 \
+  --rpc-bind-addr 0.0.0.0:4001 \
+  --mysql-addr 0.0.0.0:4002 \
+  --postgres-addr 0.0.0.0:4003 \
+  --user-provider=static_user_provider:cmd:greptime_user=greptime_pwd
+```
+
+Then run the tests:
+```bash
+rebar3 do ct,eunit
+```
 
 ## Performance
 
 ```
-Finish benchmark,
-  series: 5000,
-  concurrency: 10,
-  cost: 48 seconds,
-  rows: 10000000,
-  TPS: 208333.33333333334
+Finish benchmark, 
+  series: 5000, 
+  batchsize: 100,
+  concurrency: 10, 
+  cost: 7 seconds, 
+  rows: 1000000, 
+  TPS: 142857.14285714287
 ```

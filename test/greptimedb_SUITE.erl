@@ -23,6 +23,7 @@ all() ->
 
 init_per_suite(Config) ->
     application:ensure_all_started(greptimedb),
+    application:ensure_all_started(inets),
     Config.
 
 end_per_suite(_Config) ->
@@ -200,8 +201,8 @@ t_write(_) ->
         [{endpoints, [{http, "localhost", 4001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 5},
-         %% enable append mode
-         {grpc_hints, #{<<"append_mode">> => <<"true">>}},
+         %% enable append mode and ttl
+         {grpc_hints, #{<<"append_mode">> => <<"true">>, <<"ttl">> => <<"7 days">>}},
          {pool_type, random},
          {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
 
@@ -209,6 +210,22 @@ t_write(_) ->
     true = greptimedb:is_alive(Client),
     {ok, #{response := {affected_rows, #{value := 2}}}} =
         greptimedb:write(Client, Metric, Points),
+
+    %% assert table options
+    Sql = "show create table temperatures",
+    EncodedSql = uri_string:quote(Sql),
+    URL = "http://localhost:4000/v1/sql?sql=" ++ EncodedSql,
+    User = <<"greptime_user">>,
+    Pass = <<"greptime_pwd">>,
+    AuthBin = base64:encode(<<User/binary, ":", Pass/binary>>),
+    AuthHeader = {"authorization", <<"Basic ", AuthBin/binary>>},
+
+    {ok, {{_, 200, _}, _, RespBody}} =
+        httpc:request(get, {URL, [AuthHeader]}, [], []),
+
+    ?assert(string:find(RespBody, "ttl = '7days'") =/= nomatch),
+    ?assert(string:find(RespBody, "append_mode = 'true'") =/= nomatch),
+
     greptimedb:stop_client(Client),
     ok.
 

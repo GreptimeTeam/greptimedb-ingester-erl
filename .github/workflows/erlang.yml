@@ -15,13 +15,13 @@ jobs:
 
     runs-on: ubuntu-latest
     container:
-      image: erlang:25.3
+      image: erlang:27.2
 
     steps:
     - uses: actions/checkout@v3
     - name: Setup greptimedb
       run: |
-        GREPTIMEDB_VER=v0.9.3
+        GREPTIMEDB_VER=v0.14.2
         DOWNLOAD_URL=https://github.com/GreptimeTeam/greptimedb
         curl -L ${DOWNLOAD_URL}/releases/download/${GREPTIMEDB_VER}/greptime-linux-amd64-${GREPTIMEDB_VER}.tar.gz -o /tmp/greptimedb-${GREPTIMEDB_VER}-linux-amd64.tar.gz
         mkdir -p /tmp/greptimedb-download
