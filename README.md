@@ -270,10 +270,11 @@ rebar3 do ct,eunit
 ## Performance
 
 ```
-Finish benchmark,
-  series: 5000,
-  concurrency: 10,
-  cost: 48 seconds,
-  rows: 10000000,
-  TPS: 208333.33333333334
+Finish benchmark, 
+  series: 5000, 
+  BatchSize: 100,
+  concurrency: 10, 
+  cost: 7 seconds, 
+  rows: 1000000, 
+  TPS: 142857.14285714287
 ```
