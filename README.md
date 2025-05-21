@@ -272,7 +272,7 @@ rebar3 do ct,eunit
 ```
 Finish benchmark, 
   series: 5000, 
-  BatchSize: 100,
+  batchsize: 100,
   concurrency: 10, 
   cost: 7 seconds, 
   rows: 1000000, 
