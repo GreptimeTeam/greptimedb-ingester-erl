@@ -262,7 +262,7 @@ docker run -p 127.0.0.1:4000-4003:4000-4003 \
   --user-provider=static_user_provider:cmd:greptime_user=greptime_pwd
 ```
 
-Then:
+Then run the tests:
 ```bash
 rebar3 do ct,eunit
 ```
