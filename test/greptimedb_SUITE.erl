@@ -29,6 +29,29 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     application:stop(greptimedb).
 
+init_per_testcase(t_insert_greptime_cloud, Config) ->
+    Host = os:getenv("GT_TEST_HOST"),
+    DbName = os:getenv("GT_TEST_DB"),
+    UserName = os:getenv("GT_TEST_USER"),
+    PassWd = os:getenv("GT_TEST_PASSWD"),
+    UndefinedVars = lists:filter(
+                      fun(X) -> not is_list(X) orelse X == "" end,
+                      [Host, DbName, UserName, PassWd]),
+    case UndefinedVars of
+        [] ->
+            Config;
+        _ ->
+            {skip, cloud_env_vars_undefined}
+    end;
+init_per_testcase(_TestCase, Config) ->
+    Config.
+
+end_per_testcase(_TestCase, _Config) ->
+    ok.
+
+greptime_host() ->
+    os:getenv("GT_HOST", "localhost").
+
 points(N) ->
     lists:map(fun(Num) ->
                  #{fields => #{<<"temperature">> => Num},
@@ -153,7 +176,7 @@ t_write_failure(_) ->
            timestamp => 1619775143098}],
     Options =
         %% the port 5001 is invalid
-        [{endpoints, [{http, "localhost", 5001}]},
+        [{endpoints, [{http, greptime_host(), 5001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 5},
          {pool_type, random},
@@ -197,8 +220,9 @@ t_write(_) ->
                  <<"region">> => <<"ningbo">>,
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],
+    Host = greptime_host(),
     Options =
-        [{endpoints, [{http, "localhost", 4001}]},
+        [{endpoints, [{http, Host, 4001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 5},
          %% enable append mode and ttl
@@ -214,7 +238,7 @@ t_write(_) ->
     %% assert table options
     Sql = "show create table temperatures",
     EncodedSql = uri_string:quote(Sql),
-    URL = "http://localhost:4000/v1/sql?sql=" ++ EncodedSql,
+    URL = "http://" ++ Host ++ ":4000/v1/sql?sql=" ++ EncodedSql,
     User = <<"greptime_user">>,
     Pass = <<"greptime_pwd">>,
     AuthBin = base64:encode(<<User/binary, ":", Pass/binary>>),
@@ -248,7 +272,7 @@ t_auth_error(_) ->
                  <<"to">> => <<"kafka">>},
            timestamp => 1619775143098}],
     Options =
-        [{endpoints, [{http, "localhost", 4001}]},
+        [{endpoints, [{http, greptime_host(), 4001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 5},
          {pool_type, random},
@@ -275,7 +299,7 @@ t_auth_error(_) ->
 
 t_write_stream(_) ->
     Options =
-        [{endpoints, [{http, "localhost", 4001}]},
+        [{endpoints, [{http, greptime_host(), 4001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
@@ -298,7 +322,7 @@ t_write_stream(_) ->
 
 t_write_batch(_) ->
     Options =
-        [{endpoints, [{http, "localhost", 4001}]},
+        [{endpoints, [{http, greptime_host(), 4001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
@@ -386,7 +410,7 @@ join([]) ->
 
 t_bench_perf(_) ->
     Options =
-        [{endpoints, [{http, "localhost", 4001}]},
+        [{endpoints, [{http, greptime_host(), 4001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
@@ -478,7 +502,7 @@ recv(Ref) ->
 
 t_async_write_batch(_) ->
     Options =
-        [{endpoints, [{http, "localhost", 4001}]},
+        [{endpoints, [{http, greptime_host(), 4001}]},
          {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
