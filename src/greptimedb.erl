@@ -36,7 +36,7 @@
 
 start_client(Options0) ->
     Pool = proplists:get_value(pool, Options0),
-    Options = lists:keydelete(protocol, 1, lists:keydelete(pool, 1, Options0)),
+    Options = lists:keydelete(protocol, 1, Options0),
 
     Client =
         #{pool => Pool,
