@@ -49,7 +49,13 @@
 %% gen_server callbacks
 %% ===================================================================
 init(Args) ->
-    logger:debug("[GreptimeDB] genserver has started (~w)~n", [self()]),
+    process_flag(trap_exit, true),
+    {pool, PoolName0} = lists:keyfind(pool, 1, Args),
+    PoolName = case is_binary(PoolName0) of
+                   true -> PoolName0;
+                   false -> iolist_to_binary(io_lib:format("~0tp", [PoolName0]))
+               end,
+    {ecpool_worker_id, WorkerId} = lists:keyfind(ecpool_worker_id, 1, Args),
     Endpoints = proplists:get_value(endpoints, Args),
     Hints0 = proplists:get_value(grpc_hints, Args, #{}),
     Hints = maps:fold(fun(Key, Value, #{?GTDB_HINT_HEADER := OldValue} = Acc) ->
@@ -64,8 +70,9 @@ init(Args) ->
     Channels =
         lists:map(fun({Scheme, Host, Port}) -> {Scheme, Host, Port, ssl_options(Scheme, SslOptions)}
                   end, Endpoints),
-    Channel = list_to_atom(pid_to_list(self())),
+    Channel = iolist_to_binary([PoolName, ":", integer_to_binary(WorkerId)]),
     {ok, _} = grpcbox_channel_sup:start_child(Channel, Channels, Options),
+    logger:debug("[GreptimeDB] genserver has started (~s)~n", [Channel]),
     {ok, #state{channel = Channel, hints = Hints, requests = #{ pending => queue:new(), pending_count => 0}}}.
 
 handle_call({handle, Request}, _From, #state{channel = Channel, hints = Hints} = State) ->
