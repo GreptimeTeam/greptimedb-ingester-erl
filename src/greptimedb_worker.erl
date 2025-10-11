@@ -35,8 +35,8 @@
 -define(REQUEST_TIMEOUT, 10_000).
 -define(GTDB_HINT_HEADER, <<"x-greptime-hints">>).
 -define(CONNECT_TIMEOUT, 5_000).
--define(ASYNC_BATCH_SIZE, 100).
--define(ASYNC_BATCH_TIMEOUT, 100).
+-define(ASYNC_BATCH_SIZE, 200).
+-define(ASYNC_BATCH_LINGER, 20).
 -define(ASYNC_REQ(Req, ExpireAt, ResultCallback),
         {async, Req, ExpireAt, ResultCallback}
        ).
@@ -114,7 +114,7 @@ handle_info(timeout, State0) ->
 handle_info(Info, State) ->
     logger:debug("~p unexpected_info: ~p, channel: ~p", [?MODULE, Info, State#state.channel]),
 
-    {noreply, State, ?ASYNC_BATCH_TIMEOUT}.
+    {noreply, State, ?ASYNC_BATCH_LINGER}.
 
 
 start_link(Args) ->
@@ -182,7 +182,7 @@ reply(From, Result) ->
     gen_server:reply(From, Result).
 
 noreply_state(#state{requests = #{pending_count := N}} = State) when N > 0 ->
-    {noreply, State, ?ASYNC_BATCH_TIMEOUT};
+    {noreply, State, ?ASYNC_BATCH_LINGER};
 
 noreply_state(State) ->
     {noreply, State}.
