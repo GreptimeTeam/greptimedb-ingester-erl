@@ -155,15 +155,14 @@ merge_values(V1, V2) when map_size(V1) == 0 ->
     V2.
 
 pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
-    ValuesSize = values_size(Values),
-    NewColumn =
-        if ValuesSize == RowCount ->
-               maps:remove(null_mask, Column);
-           true ->
-               Pad = 8 - (bit_size(NullMask) - floor(bit_size(NullMask) / 8) * 8),
-               Column#{null_mask := <<0:Pad/integer, NullMask/bits>>}
-        end,
-    NewColumn.
+    case values_size(Values) of
+        RowCount ->
+            maps:remove(null_mask, Column);
+        _ ->
+            BitSize = bit_size(NullMask),
+            PadBits = (8 - (BitSize rem 8)) rem 8,
+            Column#{null_mask := <<0:PadBits, NullMask/bits>>}
+    end.
 
 convert_columns(Timeunit,
                 #{fields := Fields,
