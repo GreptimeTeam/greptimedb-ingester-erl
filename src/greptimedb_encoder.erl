@@ -113,7 +113,9 @@ metric_with_default(Default, Table)
 %% @returns {Schema, Rows} tuple
 convert_to_rows(Timeunit, Points) ->
     Schema = create_schema(Timeunit, Points),
-    Rows = lists:map(fun(Point) -> point_to_row(Timeunit, Point, Schema) end, Points),
+    %% Construct column index：Name -> {Index, SemanticType, DataType}
+    IndexMap = index_schema(Schema),
+    Rows = [point_to_row_sparse(Timeunit, Point, IndexMap) || Point <- Points],
     {Schema, Rows}.
 
 %% @private
@@ -142,6 +144,7 @@ create_schema(Timeunit, Points) ->
 %% @private
 %% @doc Extracts column information from a single point.
 %%
+%%
 %% @param Timeunit Time unit for timestamp columns
 %% @param Point Map with fields, tags, and timestamp
 %% @returns Map of column_name -> column schema
@@ -150,19 +153,38 @@ extract_columns_info(Timeunit,
                        tags := Tags,
                        timestamp := Ts}) ->
     TsInfo = ts_column_info(Timeunit, Ts),
-    FieldsInfo = maps:map(fun(Name, V) -> field_column_info(Name, V) end, Fields),
-    TagsInfo = maps:map(fun(Name, V) -> tag_column_info(Name, V) end, Tags),
-    maps:merge(
-        maps:merge(#{?TS_COLUMN => TsInfo}, FieldsInfo), TagsInfo).
+
+    FieldPairs =
+        maps:fold(fun(Name, V, Acc) -> [{Name, field_column_info(Name, V)} | Acc] end,
+                  [],
+                  Fields),
+
+    TagPairs =
+        maps:fold(fun(Name, V, Acc) -> [{Name, tag_column_info(Name, V)} | Acc] end, [], Tags),
+
+    % Ensure "tags override fields" semantics: put TagPairs last (in from_list, last occurrence wins)
+    % Reverse to maintain original order within fields and tags
+    Pairs = [{?TS_COLUMN, TsInfo}] ++ lists:reverse(FieldPairs) ++ lists:reverse(TagPairs),
+    maps:from_list(Pairs).
 
 %% @private
 %% @doc Merges column information from new columns into existing schema.
+%%
 %%
 %% @param NewColumns New column information
 %% @param ExistingColumns Existing accumulated column information
 %% @returns Merged column information
 merge_column_info(NewColumns, ExistingColumns) ->
-    maps:merge(ExistingColumns, NewColumns).
+    maps:fold(fun(K, V, Acc) ->
+                 case maps:is_key(K, Acc) of
+                     true ->
+                         Acc;  % Column already exists, skip
+                     false ->
+                         Acc#{K => V}  % Add new column
+                 end
+              end,
+              ExistingColumns,
+              NewColumns).
 
 %% @private
 %% @doc Sorts columns by semantic type: timestamp, tags, then fields.
@@ -170,10 +192,11 @@ merge_column_info(NewColumns, ExistingColumns) ->
 %% @param Columns List of {Name, Schema} tuples
 %% @returns Sorted list
 sort_columns(Columns) ->
-    lists:sort(fun({_, #{semantic_type := A}}, {_, #{semantic_type := B}}) ->
-                  semantic_type_order(A) =< semantic_type_order(B)
-               end,
-               Columns).
+    WithKey =
+        [{semantic_type_order(Sem), {Name, Schema}}
+         || {Name, #{semantic_type := Sem} = Schema} <- Columns],
+    Sorted = lists:keysort(1, WithKey),
+    [Pair || {_Key, Pair} <- Sorted].
 
 semantic_type_order('TIMESTAMP') ->
     1;
@@ -183,142 +206,73 @@ semantic_type_order('FIELD') ->
     3.
 
 %% @private
-%% @doc Converts a single point to a row following the schema.
-%%
-%% For sparse data support, missing fields/tags are represented as empty Value maps
-%% (without value_data set), which corresponds to protobuf's oneof not being set.
-%%
-%% @param Timeunit Time unit for timestamp conversion
-%% @param Point Map with fields, tags, and timestamp
-%% @param Schema List of column schemas
-%% @returns Map with values list (one value per schema column, in order)
-point_to_row(Timeunit, Point, Schema) ->
-    Values =
-        lists:map(fun(ColSchema) ->
-                     case extract_value_for_column(Timeunit, Point, ColSchema) of
-                         undefined ->
-                             #{}; % Empty Value (oneof not set)
-                         Value ->
-                             Value
-                     end
-                  end,
-                  Schema),
-    #{values => Values}.
+%% @doc Build Name -> {Index, SemanticType, DataType} index for fast sparse row fill
+index_schema(Schema) ->
+    {_, Map} =
+        lists:foldl(fun(#{column_name := Name,
+                          semantic_type := Sem,
+                          datatype := DT},
+                        {I, Acc}) ->
+                       {I + 1, Acc#{Name => {I, Sem, DT}}}
+                    end,
+                    {1, #{}},
+                    Schema),
+    Map.
 
 %% @private
-%% @doc Extracts value for a specific column from a point.
-%%
-%% @param Timeunit Time unit for timestamp conversion
-%% @param Point Map with fields, tags, and timestamp
-%% @param ColSchema Column schema map
-%% @returns Value map or undefined for missing values (undefined becomes empty Value)
-extract_value_for_column(Timeunit,
-                         Point,
-                         #{column_name := ?TS_COLUMN, semantic_type := 'TIMESTAMP'} = ColSchema) ->
-    Ts = maps:get(timestamp, Point),
-    ts_row_value(Timeunit, maps:get(datatype, ColSchema), Ts);
-extract_value_for_column(_Timeunit,
-                         Point,
-                         #{column_name := Name,
-                           semantic_type := 'FIELD',
-                           datatype := DataType}) ->
-    case maps:get(fields, Point, #{}) of
-        Fields ->
-            case maps:get(Name, Fields, undefined) of
-                undefined ->
-                    undefined;
-                V when is_map(V) ->
-                    convert_to_row_value(V);
-                V ->
-                    field_row_value(DataType, V)
-            end
-    end;
-extract_value_for_column(_Timeunit,
-                         Point,
-                         #{column_name := Name,
-                           semantic_type := 'TAG',
-                           datatype := DataType}) ->
-    case maps:get(tags, Point, #{}) of
-        Tags ->
-            case maps:get(Name, Tags, undefined) of
-                undefined ->
-                    undefined;
-                V when is_map(V) ->
-                    convert_to_row_value(V);
-                V ->
-                    tag_row_value(DataType, V)
-            end
-    end.
+%% @doc Sparse-friendly row builder using the prebuilt IndexMap.
+%% Only fills present fields/tags/timestamp; others remain as shared empty map.
+point_to_row_sparse(Timeunit, Point0, IndexMap) ->
+    Fields = maps:get(fields, Point0, #{}),
+    Tags = maps:get(tags, Point0, #{}),
+    Ts = maps:get(timestamp, Point0),
 
-%% @private
-%% @doc Converts a column-format value map to row-format value.
-%%
-%% Transforms from column format (with values array and datatype)
-%% to row format (with single value_data).
-%%
-%% @param ValueMap Map with values and potentially datatype
-%% @returns Row-format value map
-convert_to_row_value(#{values := Values} = _ValueMap) ->
-    % Extract single value from column-format values map
-    % The values map contains arrays like #{f64_values => [V]}
-    % We need to extract the single value V
-    ValueData =
-        maps:fold(fun(K, [V | _], _Acc) ->
-                     % Convert key from plural to singular
-                     % e.g., f64_values -> f64_value
-                     SingularKey = singular_key(K),
-                     #{SingularKey => V}
-                  end,
-                  #{},
-                  Values),
-    #{value_data => ValueData};
-convert_to_row_value(#{value_data := _} = Value) ->
-    % Already in row format
-    Value.
+    N = maps:size(IndexMap),
+    %% Pre‑initialize the default value as an empty map (shared single object to avoid N allocations)
+    T0 = erlang:make_tuple(N, #{}),
 
-%% @private
-%% @doc Converts plural column key to singular row key.
-%%
-%% @param Key Plural key name (e.g., f64_values)
-%% @returns Singular key name (e.g., f64_value)
-singular_key(i8_values) ->
-    i8_value;
-singular_key(i16_values) ->
-    i16_value;
-singular_key(i32_values) ->
-    i32_value;
-singular_key(i64_values) ->
-    i64_value;
-singular_key(u8_values) ->
-    u8_value;
-singular_key(u16_values) ->
-    u16_value;
-singular_key(u32_values) ->
-    u32_value;
-singular_key(u64_values) ->
-    u64_value;
-singular_key(f32_values) ->
-    f32_value;
-singular_key(f64_values) ->
-    f64_value;
-singular_key(bool_values) ->
-    bool_value;
-singular_key(binary_values) ->
-    binary_value;
-singular_key(string_values) ->
-    string_value;
-singular_key(date_values) ->
-    date_value;
-singular_key(datetime_values) ->
-    datetime_value;
-singular_key(timestamp_second_values) ->
-    timestamp_second_value;
-singular_key(timestamp_millisecond_values) ->
-    timestamp_millisecond_value;
-singular_key(timestamp_microsecond_values) ->
-    timestamp_microsecond_value;
-singular_key(timestamp_nanosecond_values) ->
-    timestamp_nanosecond_value.
+    %% timestamp
+    {TsIdx, 'TIMESTAMP', TsDT} = maps:get(?TS_COLUMN, IndexMap),
+    TsVal = ts_row_value(Timeunit, TsDT, Ts),
+    T1 = setelement(TsIdx, T0, TsVal),
+
+    %% fields
+    T2 = maps:fold(fun(Name, V, AccT) ->
+                      case maps:get(Name, IndexMap, undefined) of
+                          {Idx, 'FIELD', DT} ->
+                              Val = case V of
+                                        V when is_map(V) ->
+                                            V; % Already in row format
+                                        V ->
+                                            field_row_value(DT, V)
+                                    end,
+                              setelement(Idx, AccT, Val);
+                          _ ->
+                              AccT
+                      end
+                   end,
+                   T1,
+                   Fields),
+
+    %% tags
+    T3 = maps:fold(fun(Name, V, AccT) ->
+                      case maps:get(Name, IndexMap, undefined) of
+                          {Idx, 'TAG', DT} ->
+                              Val = case V of
+                                        V when is_map(V) ->
+                                            V; % Already in row format
+                                        V ->
+                                            tag_row_value(DT, V)
+                                    end,
+                              setelement(Idx, AccT, Val);
+                          _ ->
+                              AccT
+                      end
+                   end,
+                   T2,
+                   Tags),
+
+    #{values => erlang:tuple_to_list(T3)}.
 
 %% Column info functions (for schema creation)
 
@@ -357,7 +311,7 @@ tag_column_info(Name, _V) ->
 %% Row value functions (for data conversion)
 
 ts_row_value(_Timeunit, _DataType, Ts) when is_map(Ts) ->
-    convert_to_row_value(Ts);
+    Ts;  % Assume already in row format from greptimedb_values:timestamp_xxx_value/1
 ts_row_value(Timeunit, DataType, Ts) ->
     ts_value_by_datatype(DataType, Timeunit, Ts).
 

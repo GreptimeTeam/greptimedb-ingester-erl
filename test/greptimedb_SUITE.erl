@@ -650,9 +650,7 @@ t_insert_requests_single_point(_) ->
     #{header := #{dbname := "greptime-public"},
       request :=
           {row_inserts,
-           #{inserts :=
-                 [#{table_name := "sensors",
-                    rows := #{schema := Schema, rows := Rows}}]}}} =
+           #{inserts := [#{table_name := "sensors", rows := #{schema := Schema, rows := Rows}}]}}} =
         Request,
 
     ?assertEqual(3, length(Schema)), % temp, sensor, timestamp
@@ -682,7 +680,9 @@ t_insert_requests_all_sparse(_) ->
     Client = #{cli_opts => [{timeunit, s}]},
     Request = greptimedb_encoder:insert_requests(Client, [{"sparse_test", Points}]),
 
-    #{request := {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} = Request,
+    #{request :=
+          {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} =
+        Request,
 
     ?assertEqual(7, length(Schema)), % 3 fields + 3 tags + timestamp
     ?assertEqual(3, length(Rows)),
@@ -722,7 +722,9 @@ t_insert_requests_all_data_types(_) ->
     Client = #{cli_opts => [{timeunit, ms}]},
     Request = greptimedb_encoder:insert_requests(Client, [{"types_test", [Point]}]),
 
-    #{request := {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} = Request,
+    #{request :=
+          {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} =
+        Request,
     ?assertEqual(1, length(Rows)),
 
     % Verify schema datatypes
@@ -788,7 +790,10 @@ t_insert_requests_all_time_units(_) ->
                      Client = #{cli_opts => [{timeunit, TimeUnit}]},
                      Request = greptimedb_encoder:insert_requests(Client, [{"time_test", [Point]}]),
 
-                     #{request := {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} = Request,
+                     #{request :=
+                           {row_inserts,
+                            #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} =
+                         Request,
                      ?assertEqual(1, length(Rows)),
 
                      {value, TsSchema} =
@@ -815,7 +820,8 @@ t_insert_requests_metric_formats(_) ->
 
     % Test 2: Binary table name
     Request2 = greptimedb_encoder:insert_requests(Client1, [{<<"binary_table">>, [Point]}]),
-    #{request := {row_inserts, #{inserts := [#{table_name := <<"binary_table">>}]}}} = Request2,
+    #{request := {row_inserts, #{inserts := [#{table_name := <<"binary_table">>}]}}} =
+        Request2,
 
     % Test 3: Atom table name
     Request3 = greptimedb_encoder:insert_requests(Client1, [{atom_table, [Point]}]),
@@ -836,7 +842,9 @@ t_insert_requests_metric_formats(_) ->
     Request5 = greptimedb_encoder:insert_requests(Client1, [{MetricMap, [Point]}]),
     #{header := #{dbname := "map_db"}} = Request5,
     #{request :=
-          {row_inserts, #{inserts := [#{table_name := "map_table", rows := #{schema := Schema, rows := _Rows}}]}}} =
+          {row_inserts,
+           #{inserts :=
+                 [#{table_name := "map_table", rows := #{schema := Schema, rows := _Rows}}]}}} =
         Request5,
 
     % Verify timeunit override (should be seconds, not ms from client)
