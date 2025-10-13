@@ -222,7 +222,7 @@ pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
             maps:remove(null_mask, Column);
         _ ->
             BitSize = bit_size(NullMask),
-            PadBits = (8 - (BitSize rem 8)) rem 8,
+            PadBits = (8 - BitSize rem 8) rem 8,
             Column#{null_mask := <<0:PadBits, NullMask/bits>>}
     end.
 
@@ -249,8 +249,8 @@ convert_columns(Timeunit,
 %% @doc Merges a column with data from the next row.
 %%
 %% Updates the null mask to track whether the column has a value in this row:
-%% - 1 bit: column has a value in this row
-%% - 0 bit: column is null/missing in this row
+%% - 0 bit: column has a value in this row
+%% - 1 bit: column is null/missing in this row
 %%
 %% @param Column Existing column accumulator with null mask
 %% @param Name Column name to look for in NextColumns
@@ -264,12 +264,12 @@ merge_column(#{null_mask := NullMask} = Column, Name, NextColumns) ->
             MergedValues = merge_values(Values, NewValues),
             case map_size(Column) of
                 1 ->
-                    NewColumn#{values := MergedValues, null_mask => <<NullMask/bits, 1:1/integer>>};
+                    NewColumn#{values := MergedValues, null_mask => <<0:1/integer, NullMask/bits>>};
                 _ ->
-                    Column#{values := MergedValues, null_mask := <<NullMask/bits, 1:1/integer>>}
+                    Column#{values := MergedValues, null_mask := <<0:1/integer, NullMask/bits>>}
             end;
         _ ->
-            Column#{null_mask := <<NullMask/bits, 0:1/integer>>}
+            Column#{null_mask := <<1:1/integer, NullMask/bits>>}
     end.
 
 %% @private
@@ -319,12 +319,12 @@ flatten([[H] | T], Acc) ->
 %% Row 3: #{"temp" => 21, "pressure" => 1013}  % missing humidity, has pressure
 %%
 %% Result after merging:
-%% - temp:     values=[20,22,21], null_mask=<<1:1,1:1,1:1>> (all rows have it)
-%% - humidity: values=[60],       null_mask=<<1:1,0:1,0:1>> (only row 1 has it)
-%% - pressure: values=[1013],     null_mask=<<0:1,0:1,1:1>> (only row 3 has it)
+%% - temp:     values=[20,22,21],
+%% - humidity: values=[60],       null_mask=<<1:1,1:1,0:1>> (only row 1 has it)
+%% - pressure: values=[1013],     null_mask=<<0:1,1:1,1:1>> (only row 3 has it)
 %% ```
 %%
-%% The null mask bitfield: 1=has value, 0=null/missing, read left-to-right for rows.
+%% The null mask bitfield: 0=has value, 1=null/missing.
 %%
 %% The process:
 %% 1. Collects all unique column names (temp, humidity, pressure)
