@@ -187,14 +187,14 @@ merge_column_info(NewColumns, ExistingColumns) ->
               NewColumns).
 
 %% @private
-%% @doc Sorts columns by semantic type: timestamp, tags, then fields.
+%% @doc Sorts columns by semantic type(timestamp, tags, then fields) and name.
 %%
 %% @param Columns List of {Name, Schema} tuples
 %% @returns Sorted list
 sort_columns(Columns) ->
     WithKey =
-        [{semantic_type_order(Sem), {Name, Schema}}
-         || {Name, #{semantic_type := Sem} = Schema} <- Columns],
+        [ {{semantic_type_order(Sem), Name}, {Name, Schema}}
+          || {Name, #{semantic_type := Sem} = Schema} <- Columns ],
     Sorted = lists:keysort(1, WithKey),
     [Pair || {_Key, Pair} <- Sorted].
 
