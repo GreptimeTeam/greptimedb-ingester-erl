@@ -126,7 +126,6 @@ t_insert_requests(_) ->
             ?assert(lists:member(<<"to">>, ColumnNames)),
             ?assert(lists:member(<<"device">>, ColumnNames)),
 
-            %% Create a helper function to get column index
             GetColumnIndex =
                 fun(ColName) ->
                    Zipped =
@@ -140,7 +139,6 @@ t_insert_requests(_) ->
                    end
                 end,
 
-            % Get column indices
             TsIdx = GetColumnIndex(<<"greptime_timestamp">>),
             TempIdx = GetColumnIndex(<<"temperature">>),
             HostIdx = GetColumnIndex(<<"host">>),
