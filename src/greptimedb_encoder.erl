@@ -19,9 +19,9 @@
 -define(TS_COLUMN, <<"greptime_timestamp">>).
 -define(DEFAULT_DBNAME, "greptime-public").
 
-%% @doc Converts a batch of data points into GreptimeDB gRPC insert requests.
+%% @doc Converts a batch of data points into GreptimeDB gRPC row-based insert requests.
 %%
-%% This function transforms Erlang data structures into the protobuf format
+%% This function transforms Erlang data structures into the row-based protobuf format
 %% required by GreptimeDB's gRPC API for batch inserts.
 %%
 %% @param Client A map containing client options, including:
@@ -39,7 +39,7 @@
 %%
 %% @returns A map containing:
 %%   - `header`: Map with dbname and optional authorization
-%%   - `request`: Tuple {inserts, #{inserts => [...]}} with column data
+%%   - `request`: Tuple {row_inserts, #{inserts => [...]}} with row data
 %%
 %% Example:
 %% ```
@@ -62,12 +62,12 @@ insert_requests(#{cli_opts := Options} = _Client, [], DbName, Inserts) ->
             Scheme ->
                 #{dbname => DbName, authorization => #{auth_scheme => Scheme}}
         end,
-    #{header => Header, request => {inserts, #{inserts => Inserts}}};
+    #{header => Header, request => {row_inserts, #{inserts => Inserts}}};
 insert_requests(#{cli_opts := Options} = Client,
                 [{Metric, Points} | T],
                 PrevDbName,
                 Inserts) ->
-    {DbName, Insert} = make_insert_request(Options, metric(Options, Metric), Points),
+    {DbName, Insert} = make_row_insert_request(Options, metric(Options, Metric), Points),
     case PrevDbName of
         unknown ->
             insert_requests(Client, T, DbName, [Insert | Inserts]);
@@ -75,19 +75,13 @@ insert_requests(#{cli_opts := Options} = Client,
             insert_requests(Client, T, Name, [Insert | Inserts])
     end.
 
-make_insert_request(_Options,
-                    #{dbname := DbName,
-                      table := Table,
-                      timeunit := Timeunit},
-                    Points) ->
-    RowCount = length(Points),
-    Columns =
-        lists:map(fun(Column) -> pad_null_mask(Column, RowCount) end,
-                  collect_columns(Timeunit, Points)),
-    {DbName,
-     #{table_name => Table,
-       columns => Columns,
-       row_count => RowCount}}.
+make_row_insert_request(_Options,
+                        #{dbname := DbName,
+                          table := Table,
+                          timeunit := Timeunit},
+                        Points) ->
+    {Schema, Rows} = convert_to_rows(Timeunit, Points),
+    {DbName, #{table_name => Table, rows => #{schema => Schema, rows => Rows}}}.
 
 %%%===================================================================
 %%% Internal functions
@@ -109,264 +103,344 @@ metric_with_default(Default, Table)
     Default#{table => Table}.
 
 %% @private
-%% @doc Collects and merges columns from all data points.
+%% @doc Converts points to row-based format with schema and rows.
 %%
-%% Iterates through all points, extracting columns from each and merging them
-%% into a unified column structure. Handles sparse data by tracking null values.
+%% Creates a schema from all unique columns across points, then
+%% converts each point to a row following the schema order.
 %%
 %% @param Timeunit Time unit for timestamp columns (ns, us, ms, s)
 %% @param Points List of data points
-%% @returns List of merged column structures
-collect_columns(Timeunit, Points) ->
-    collect_columns(Timeunit, Points, []).
+%% @returns {Schema, Rows} tuple
+convert_to_rows(Timeunit, Points) ->
+    Schema = create_schema(Timeunit, Points),
+    Rows = lists:map(fun(Point) -> point_to_row(Timeunit, Point, Schema) end, Points),
+    {Schema, Rows}.
 
 %% @private
-%% @doc Recursive helper for collect_columns/2.
-collect_columns(_Timeunit, [], Columns) ->
-    merge_columns(Columns);
-collect_columns(Timeunit, [Point | T], Columns) ->
-    collect_columns(Timeunit, T, [convert_columns(Timeunit, Point) | Columns]).
-
-values_size(#{i8_values := Values}) ->
-    length(Values);
-values_size(#{i16_values := Values}) ->
-    length(Values);
-values_size(#{i32_values := Values}) ->
-    length(Values);
-values_size(#{i64_values := Values}) ->
-    length(Values);
-values_size(#{u8_values := Values}) ->
-    length(Values);
-values_size(#{u16_values := Values}) ->
-    length(Values);
-values_size(#{u32_values := Values}) ->
-    length(Values);
-values_size(#{u64_values := Values}) ->
-    length(Values);
-values_size(#{f32_values := Values}) ->
-    length(Values);
-values_size(#{f64_values := Values}) ->
-    length(Values);
-values_size(#{bool_values := Values}) ->
-    length(Values);
-values_size(#{binary_values := Values}) ->
-    length(Values);
-values_size(#{string_values := Values}) ->
-    length(Values);
-values_size(#{date_values := Values}) ->
-    length(Values);
-values_size(#{timestamp_second_values := Values}) ->
-    length(Values);
-values_size(#{timestamp_millisecond_values := Values}) ->
-    length(Values);
-values_size(#{timestamp_microsecond_values := Values}) ->
-    length(Values);
-values_size(#{timestamp_nanosecond_values := Values}) ->
-    length(Values).
-
-merge_values(#{i8_values := V1} = L, #{i8_values := V2}) ->
-    L#{i8_values := [V2 | V1]};
-merge_values(#{i16_values := V1} = L, #{i16_values := V2}) ->
-    L#{i16_values := [V2 | V1]};
-merge_values(#{i32_values := V1} = L, #{i32_values := V2}) ->
-    L#{i32_values := [V2 | V1]};
-merge_values(#{i64_values := V1} = L, #{i64_values := V2}) ->
-    L#{i64_values := [V2 | V1]};
-merge_values(#{u8_values := V1} = L, #{u8_values := V2}) ->
-    L#{u8_values := [V2 | V1]};
-merge_values(#{u16_values := V1} = L, #{u16_values := V2}) ->
-    L#{u16_values := [V2 | V1]};
-merge_values(#{u32_values := V1} = L, #{u32_values := V2}) ->
-    L#{u32_values := [V2 | V1]};
-merge_values(#{u64_values := V1} = L, #{u64_values := V2}) ->
-    L#{u64_values := [V2 | V1]};
-merge_values(#{f32_values := V1} = L, #{f32_values := V2}) ->
-    L#{f32_values := [V2 | V1]};
-merge_values(#{f64_values := V1} = L, #{f64_values := V2}) ->
-    L#{f64_values := [V2 | V1]};
-merge_values(#{bool_values := V1} = L, #{bool_values := V2}) ->
-    L#{bool_values := [V2 | V1]};
-merge_values(#{binary_values := V1} = L, #{binary_values := V2}) ->
-    L#{binary_values := [V2 | V1]};
-merge_values(#{string_values := V1} = L, #{string_values := V2}) ->
-    L#{string_values := [V2 | V1]};
-merge_values(#{date_values := V1} = L, #{date_values := V2}) ->
-    L#{date_values := [V2 | V1]};
-merge_values(#{timestamp_second_values := V1} = L, #{timestamp_second_values := V2}) ->
-    L#{timestamp_second_values := [V2 | V1]};
-merge_values(#{timestamp_millisecond_values := V1} = L,
-             #{timestamp_millisecond_values := V2}) ->
-    L#{timestamp_millisecond_values := [V2 | V1]};
-merge_values(#{timestamp_microsecond_values := V1} = L,
-             #{timestamp_microsecond_values := V2}) ->
-    L#{timestamp_microsecond_values := [V2 | V1]};
-merge_values(#{timestamp_nanosecond_values := V1} = L,
-             #{timestamp_nanosecond_values := V2}) ->
-    L#{timestamp_nanosecond_values := [V2 | V1]};
-merge_values(V1, V2) when map_size(V1) == 0 ->
-    V2.
+%% @doc Creates a column schema from all points.
+%%
+%% Extracts all unique columns from points and creates a consistent
+%% schema with column names, datatypes, and semantic types.
+%%
+%% @param Timeunit Time unit for timestamp columns
+%% @param Points List of data points
+%% @returns List of column schema maps
+create_schema(Timeunit, Points) ->
+    % Collect all unique column info from all points
+    AllColumns =
+        lists:foldl(fun(Point, Acc) ->
+                       Columns = extract_columns_info(Timeunit, Point),
+                       merge_column_info(Columns, Acc)
+                    end,
+                    #{},
+                    Points),
+    % Convert to list and sort for consistent order
+    % Timestamp first, then tags, then fields
+    SortedColumns = sort_columns(maps:to_list(AllColumns)),
+    lists:map(fun({_Name, Schema}) -> Schema end, SortedColumns).
 
 %% @private
-%% @doc Pads null mask to byte boundary or removes it if not needed.
+%% @doc Extracts column information from a single point.
 %%
-%% If a column has values for all rows, the null mask is removed.
-%% Otherwise, the null mask is padded with zeros to align to byte boundaries
-%% as required by the GreptimeDB protocol.
-%%
-%% @param Column Column map with values and null_mask
-%% @param RowCount Total number of rows in the batch
-%% @returns Updated column with adjusted null mask
-pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
-    case values_size(Values) of
-        RowCount ->
-            maps:remove(null_mask, Column);
-        _ ->
-            BitSize = bit_size(NullMask),
-            PadBits = (8 - (BitSize rem 8)) rem 8,
-            Column#{null_mask := <<0:PadBits, NullMask/bits>>}
-    end.
+%% @param Timeunit Time unit for timestamp columns
+%% @param Point Map with fields, tags, and timestamp
+%% @returns Map of column_name -> column schema
+extract_columns_info(Timeunit,
+                     #{fields := Fields,
+                       tags := Tags,
+                       timestamp := Ts}) ->
+    TsInfo = ts_column_info(Timeunit, Ts),
+    FieldsInfo = maps:map(fun(Name, V) -> field_column_info(Name, V) end, Fields),
+    TagsInfo = maps:map(fun(Name, V) -> tag_column_info(Name, V) end, Tags),
+    maps:merge(
+        maps:merge(#{?TS_COLUMN => TsInfo}, FieldsInfo), TagsInfo).
 
 %% @private
-%% @doc Converts a single point into column structures.
+%% @doc Merges column information from new columns into existing schema.
 %%
-%% Transforms fields, tags, and timestamp from a point into column maps
-%% keyed by column name. Each column includes semantic type and values.
+%% @param NewColumns New column information
+%% @param ExistingColumns Existing accumulated column information
+%% @returns Merged column information
+merge_column_info(NewColumns, ExistingColumns) ->
+    maps:merge(ExistingColumns, NewColumns).
+
+%% @private
+%% @doc Sorts columns by semantic type: timestamp, tags, then fields.
+%%
+%% @param Columns List of {Name, Schema} tuples
+%% @returns Sorted list
+sort_columns(Columns) ->
+    lists:sort(fun({_, #{semantic_type := A}}, {_, #{semantic_type := B}}) ->
+                  semantic_type_order(A) =< semantic_type_order(B)
+               end,
+               Columns).
+
+semantic_type_order('TIMESTAMP') ->
+    1;
+semantic_type_order('TAG') ->
+    2;
+semantic_type_order('FIELD') ->
+    3.
+
+%% @private
+%% @doc Converts a single point to a row following the schema.
+%%
+%% For sparse data support, missing fields/tags are represented as empty Value maps
+%% (without value_data set), which corresponds to protobuf's oneof not being set.
 %%
 %% @param Timeunit Time unit for timestamp conversion
 %% @param Point Map with fields, tags, and timestamp
-%% @returns Map of column_name -> column structure
-convert_columns(Timeunit,
-                #{fields := Fields,
-                  tags := Tags,
-                  timestamp := Ts}) ->
-    TsColumn = ts_column(Timeunit, Ts),
-    FieldColumns = maps:map(fun(K, V) -> field_column(K, V) end, Fields),
-    TagColumns = maps:map(fun(K, V) -> tag_column(K, V) end, Tags),
-    maps:put(
-        maps:get(column_name, TsColumn), TsColumn, maps:merge(FieldColumns, TagColumns)).
+%% @param Schema List of column schemas
+%% @returns Map with values list (one value per schema column, in order)
+point_to_row(Timeunit, Point, Schema) ->
+    Values =
+        lists:map(fun(ColSchema) ->
+                     case extract_value_for_column(Timeunit, Point, ColSchema) of
+                         undefined ->
+                             #{}; % Empty Value (oneof not set)
+                         Value ->
+                             Value
+                     end
+                  end,
+                  Schema),
+    #{values => Values}.
 
 %% @private
-%% @doc Merges a column with data from the next row.
+%% @doc Extracts value for a specific column from a point.
 %%
-%% Updates the null mask to track whether the column has a value in this row:
-%% - 0 bit: column has a value in this row
-%% - 1 bit: column is null/missing in this row
-%%
-%% @param Column Existing column accumulator with null mask
-%% @param Name Column name to look for in NextColumns
-%% @param NextColumns Map of columns from the current row being processed
-%% @returns Updated column with merged values and extended null mask
-merge_column(#{null_mask := NullMask} = Column, Name, NextColumns) ->
-    case NextColumns of
-        #{Name := NewColumn} ->
-            Values = maps:get(values, Column, #{}),
-            NewValues = maps:get(values, NewColumn),
-            MergedValues = merge_values(Values, NewValues),
-            case map_size(Column) of
-                1 ->
-                    NewColumn#{values := MergedValues, null_mask => <<0:1/integer, NullMask/bits>>};
-                _ ->
-                    Column#{values := MergedValues, null_mask := <<0:1/integer, NullMask/bits>>}
-            end;
-        _ ->
-            Column#{null_mask := <<1:1/integer, NullMask/bits>>}
+%% @param Timeunit Time unit for timestamp conversion
+%% @param Point Map with fields, tags, and timestamp
+%% @param ColSchema Column schema map
+%% @returns Value map or undefined for missing values (undefined becomes empty Value)
+extract_value_for_column(Timeunit,
+                         Point,
+                         #{column_name := ?TS_COLUMN, semantic_type := 'TIMESTAMP'} = ColSchema) ->
+    Ts = maps:get(timestamp, Point),
+    ts_row_value(Timeunit, maps:get(datatype, ColSchema), Ts);
+extract_value_for_column(_Timeunit,
+                         Point,
+                         #{column_name := Name,
+                           semantic_type := 'FIELD',
+                           datatype := DataType}) ->
+    case maps:get(fields, Point, #{}) of
+        Fields ->
+            case maps:get(Name, Fields, undefined) of
+                undefined ->
+                    undefined;
+                V when is_map(V) ->
+                    convert_to_row_value(V);
+                V ->
+                    field_row_value(DataType, V)
+            end
+    end;
+extract_value_for_column(_Timeunit,
+                         Point,
+                         #{column_name := Name,
+                           semantic_type := 'TAG',
+                           datatype := DataType}) ->
+    case maps:get(tags, Point, #{}) of
+        Tags ->
+            case maps:get(Name, Tags, undefined) of
+                undefined ->
+                    undefined;
+                V when is_map(V) ->
+                    convert_to_row_value(V);
+                V ->
+                    tag_row_value(DataType, V)
+            end
     end.
 
 %% @private
-%% @doc Merges columns from a new row into the accumulator.
+%% @doc Converts a column-format value map to row-format value.
 %%
-%% This is the fold function used by merge_columns/1. It processes one row
-%% at a time, calling merge_column/3 for each column in the accumulator.
+%% Transforms from column format (with values array and datatype)
+%% to row format (with single value_data).
 %%
-%% @param NextColumns Columns from the current row
-%% @param Columns Accumulator of {Name, Column} tuples
-%% @returns Updated accumulator with merged columns
-merge_columns(NextColumns, Columns) ->
-    lists:map(fun({Name, Column}) -> {Name, merge_column(Column, Name, NextColumns)} end,
-              Columns).
+%% @param ValueMap Map with values and potentially datatype
+%% @returns Row-format value map
+convert_to_row_value(#{values := Values} = _ValueMap) ->
+    % Extract single value from column-format values map
+    % The values map contains arrays like #{f64_values => [V]}
+    % We need to extract the single value V
+    ValueData =
+        maps:fold(fun(K, [V | _], _Acc) ->
+                     % Convert key from plural to singular
+                     % e.g., f64_values -> f64_value
+                     SingularKey = singular_key(K),
+                     #{SingularKey => V}
+                  end,
+                  #{},
+                  Values),
+    #{value_data => ValueData};
+convert_to_row_value(#{value_data := _} = Value) ->
+    % Already in row format
+    Value.
 
 %% @private
-%% @doc Flattens nested lists of values.
+%% @doc Converts plural column key to singular row key.
 %%
-%% Used to flatten the accumulated value lists after merging.
-%% Values are accumulated as nested lists during merging and need
-%% to be flattened into a single list for the final column structure.
-%%
-%% @param L Nested list structure
-%% @returns Flattened list
-flatten([H]) ->
-    [H];
-flatten([[H] | T]) ->
-    flatten(T, [H]).
+%% @param Key Plural key name (e.g., f64_values)
+%% @returns Singular key name (e.g., f64_value)
+singular_key(i8_values) ->
+    i8_value;
+singular_key(i16_values) ->
+    i16_value;
+singular_key(i32_values) ->
+    i32_value;
+singular_key(i64_values) ->
+    i64_value;
+singular_key(u8_values) ->
+    u8_value;
+singular_key(u16_values) ->
+    u16_value;
+singular_key(u32_values) ->
+    u32_value;
+singular_key(u64_values) ->
+    u64_value;
+singular_key(f32_values) ->
+    f32_value;
+singular_key(f64_values) ->
+    f64_value;
+singular_key(bool_values) ->
+    bool_value;
+singular_key(binary_values) ->
+    binary_value;
+singular_key(string_values) ->
+    string_value;
+singular_key(date_values) ->
+    date_value;
+singular_key(datetime_values) ->
+    datetime_value;
+singular_key(timestamp_second_values) ->
+    timestamp_second_value;
+singular_key(timestamp_millisecond_values) ->
+    timestamp_millisecond_value;
+singular_key(timestamp_microsecond_values) ->
+    timestamp_microsecond_value;
+singular_key(timestamp_nanosecond_values) ->
+    timestamp_nanosecond_value.
 
-flatten([], Acc) ->
-    Acc;
-flatten([H], Acc) ->
-    [H | Acc];
-flatten([[H] | T], Acc) ->
-    flatten(T, [H | Acc]).
+%% Column info functions (for schema creation)
+
+ts_column_info(_Timeunit, Ts) when is_map(Ts) ->
+    % Infer datatype from the value_data structure
+    DataType = infer_timestamp_datatype(Ts),
+    #{column_name => ?TS_COLUMN,
+      semantic_type => 'TIMESTAMP',
+      datatype => DataType};
+ts_column_info(Timeunit, _Ts) ->
+    DataType = ts_datatype(Timeunit),
+    #{column_name => ?TS_COLUMN,
+      semantic_type => 'TIMESTAMP',
+      datatype => DataType}.
+
+field_column_info(Name, V) when is_map(V) ->
+    DataType = infer_datatype(V),
+    #{column_name => Name,
+      semantic_type => 'FIELD',
+      datatype => DataType};
+field_column_info(Name, _V) ->
+    #{column_name => Name,
+      semantic_type => 'FIELD',
+      datatype => 'FLOAT64'}.
+
+tag_column_info(Name, V) when is_map(V) ->
+    DataType = infer_datatype(V),
+    #{column_name => Name,
+      semantic_type => 'TAG',
+      datatype => DataType};
+tag_column_info(Name, _V) ->
+    #{column_name => Name,
+      semantic_type => 'TAG',
+      datatype => 'STRING'}.
+
+%% Row value functions (for data conversion)
+
+ts_row_value(_Timeunit, _DataType, Ts) when is_map(Ts) ->
+    convert_to_row_value(Ts);
+ts_row_value(Timeunit, DataType, Ts) ->
+    ts_value_by_datatype(DataType, Timeunit, Ts).
+
+ts_value_by_datatype('TIMESTAMP_NANOSECOND', _Timeunit, Ts) ->
+    greptimedb_values:timestamp_nanosecond_value(Ts);
+ts_value_by_datatype('TIMESTAMP_MICROSECOND', _Timeunit, Ts) ->
+    greptimedb_values:timestamp_microsecond_value(Ts);
+ts_value_by_datatype('TIMESTAMP_MILLISECOND', _Timeunit, Ts) ->
+    greptimedb_values:timestamp_millisecond_value(Ts);
+ts_value_by_datatype('TIMESTAMP_SECOND', _Timeunit, Ts) ->
+    greptimedb_values:timestamp_second_value(Ts);
+ts_value_by_datatype(_, Timeunit, Ts) ->
+    % Fallback to timeunit-based conversion
+    ts_value(Timeunit, Ts).
+
+field_row_value('FLOAT64', V) ->
+    greptimedb_values:float64_value(V);
+field_row_value('INT32', V) ->
+    greptimedb_values:int32_value(V);
+field_row_value('INT64', V) ->
+    greptimedb_values:int64_value(V);
+field_row_value('UINT32', V) ->
+    greptimedb_values:uint32_value(V);
+field_row_value('UINT64', V) ->
+    greptimedb_values:uint64_value(V);
+field_row_value('BOOLEAN', V) ->
+    greptimedb_values:boolean_value(V);
+field_row_value('STRING', V) ->
+    greptimedb_values:string_value(V);
+field_row_value('BINARY', V) ->
+    greptimedb_values:binary_value(V);
+field_row_value('DATE', V) ->
+    greptimedb_values:date_value(V);
+field_row_value('DATETIME', V) ->
+    greptimedb_values:datetime_value(V);
+field_row_value(_, V) ->
+    % Default to FLOAT64
+    greptimedb_values:float64_value(V).
+
+tag_row_value('STRING', V) ->
+    greptimedb_values:string_value(V);
+tag_row_value('INT32', V) ->
+    greptimedb_values:int32_value(V);
+tag_row_value('INT64', V) ->
+    greptimedb_values:int64_value(V);
+tag_row_value('UINT32', V) ->
+    greptimedb_values:uint32_value(V);
+tag_row_value('UINT64', V) ->
+    greptimedb_values:uint64_value(V);
+tag_row_value('BINARY', V) ->
+    greptimedb_values:binary_value(V);
+tag_row_value(_, V) ->
+    % Default to STRING
+    greptimedb_values:string_value(V).
 
 %% @private
-%% @doc Merges columns from all rows into a unified structure.
+%% @doc Determines timestamp datatype based on time unit.
 %%
-%% Creates a column for every unique column name across all rows,
-%% tracking null values where columns are missing in specific rows.
-%%
-%% Example with 3 rows having different columns:
-%% ```
-%% Row 1: #{"temp" => 20, "humidity" => 60}
-%% Row 2: #{"temp" => 22}                      % missing humidity
-%% Row 3: #{"temp" => 21, "pressure" => 1013}  % missing humidity, has pressure
-%%
-%% Result after merging:
-%% - temp:     values=[20,22,21],
-%% - humidity: values=[60],       null_mask=<<1:1,1:1,0:1>> (only row 1 has it)
-%% - pressure: values=[1013],     null_mask=<<0:1,1:1,1:1>> (only row 3 has it)
-%% ```
-%%
-%% The null mask bitfield: 0=has value, 1=null/missing.
-%%
-%% The process:
-%% 1. Collects all unique column names (temp, humidity, pressure)
-%% 2. Creates empty columns with null masks
-%% 3. Merges data from each row using merge_columns/2 and merge_column/3
-%% 4. Flattens the accumulated value lists
-%%
-%% @param Columns List of column maps from all rows
-%% @returns List of merged columns with complete data and null masks
-merge_columns(Columns) ->
-    Names =
-        sets:to_list(
-            sets:from_list(
-                lists:flatten(
-                    lists:map(fun(C) -> maps:keys(C) end, Columns)))),
-    EmptyColumns = lists:map(fun(Name) -> {Name, #{null_mask => <<>>}} end, Names),
-    lists:map(fun({_Name, Column}) ->
-                 maps:update_with(values,
-                                  fun(Values) -> maps:map(fun(_K, VS) -> flatten(VS) end, Values)
-                                  end,
-                                  Column)
-              end,
-              lists:foldl(fun merge_columns/2, EmptyColumns, lists:reverse(Columns))).
-
-ts_column(_Timeunit, Ts) when is_map(Ts) ->
-    maps:merge(#{column_name => ?TS_COLUMN, semantic_type => 'TIMESTAMP'}, Ts);
-ts_column(Timeunit, Ts) ->
-    TsValue = ts_value(Timeunit, Ts),
-    TsValue#{column_name => ?TS_COLUMN, semantic_type => 'TIMESTAMP'}.
+%% @param Timeunit Time unit specification
+%% @returns Datatype atom
+ts_datatype(ns) ->
+    'TIMESTAMP_NANOSECOND';
+ts_datatype(nanosecond) ->
+    'TIMESTAMP_NANOSECOND';
+ts_datatype(us) ->
+    'TIMESTAMP_MICROSECOND';
+ts_datatype(microsecond) ->
+    'TIMESTAMP_MICROSECOND';
+ts_datatype(ms) ->
+    'TIMESTAMP_MILLISECOND';
+ts_datatype(millisecond) ->
+    'TIMESTAMP_MILLISECOND';
+ts_datatype(s) ->
+    'TIMESTAMP_SECOND';
+ts_datatype(second) ->
+    'TIMESTAMP_SECOND'.
 
 %% @private
 %% @doc Converts timestamp to appropriate typed value based on time unit.
 %%
-%% Supports both short and long time unit names:
-%% - ns/nanosecond
-%% - us/microsecond
-%% - ms/millisecond (default)
-%% - s/second
-%%
 %% @param Timeunit Time unit specification
 %% @param Ts Timestamp value
-%% @returns Map with typed timestamp value and datatype
+%% @returns Map with typed timestamp value
 ts_value(ns, Ts) ->
     greptimedb_values:timestamp_nanosecond_value(Ts);
 ts_value(nanosecond, Ts) ->
@@ -384,18 +458,70 @@ ts_value(s, Ts) ->
 ts_value(second, Ts) ->
     greptimedb_values:timestamp_second_value(Ts).
 
-field_column(Name, V) when is_map(V) ->
-    maps:merge(#{column_name => Name, semantic_type => 'FIELD'}, V);
-field_column(Name, V) ->
-    #{column_name => Name,
-      semantic_type => 'FIELD',
-      values => #{f64_values => [V]},
-      datatype => 'FLOAT64'}.
+%% @private
+%% @doc Infers timestamp datatype from the value structure.
+%%
+%% @param Value Map containing value_data
+%% @returns Datatype atom
+infer_timestamp_datatype(#{value_data := {Type, _Value}}) ->
+    case Type of
+        timestamp_nanosecond_value ->
+            'TIMESTAMP_NANOSECOND';
+        timestamp_microsecond_value ->
+            'TIMESTAMP_MICROSECOND';
+        timestamp_millisecond_value ->
+            'TIMESTAMP_MILLISECOND';
+        timestamp_second_value ->
+            'TIMESTAMP_SECOND';
+        _ ->
+            'TIMESTAMP_MILLISECOND' % Default
+    end.
 
-tag_column(Name, V) when is_map(V) ->
-    maps:merge(#{column_name => Name, semantic_type => 'TAG'}, V);
-tag_column(Name, V) ->
-    #{column_name => Name,
-      semantic_type => 'TAG',
-      values => #{string_values => [V]},
-      datatype => 'STRING'}.
+%% @private
+%% @doc Infers datatype from the value structure.
+%%
+%% @param Value Map containing value_data
+%% @returns Datatype atom
+infer_datatype(#{value_data := {Type, _Value}}) ->
+    case Type of
+        i8_value ->
+            'INT8';
+        i16_value ->
+            'INT16';
+        i32_value ->
+            'INT32';
+        i64_value ->
+            'INT64';
+        u8_value ->
+            'UINT8';
+        u16_value ->
+            'UINT16';
+        u32_value ->
+            'UINT32';
+        u64_value ->
+            'UINT64';
+        f32_value ->
+            'FLOAT32';
+        f64_value ->
+            'FLOAT64';
+        bool_value ->
+            'BOOLEAN';
+        binary_value ->
+            'BINARY';
+        string_value ->
+            'STRING';
+        date_value ->
+            'DATE';
+        datetime_value ->
+            'DATETIME';
+        timestamp_nanosecond_value ->
+            'TIMESTAMP_NANOSECOND';
+        timestamp_microsecond_value ->
+            'TIMESTAMP_MICROSECOND';
+        timestamp_millisecond_value ->
+            'TIMESTAMP_MILLISECOND';
+        timestamp_second_value ->
+            'TIMESTAMP_SECOND';
+        _ ->
+            'STRING' % Default
+    end.
