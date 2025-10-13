@@ -222,7 +222,7 @@ pad_null_mask(#{values := Values, null_mask := NullMask} = Column, RowCount) ->
             maps:remove(null_mask, Column);
         _ ->
             BitSize = bit_size(NullMask),
-            PadBits = (8 - BitSize rem 8) rem 8,
+            PadBits = (8 - (BitSize rem 8)) rem 8,
             Column#{null_mask := <<0:PadBits, NullMask/bits>>}
     end.
 
