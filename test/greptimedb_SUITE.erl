@@ -30,7 +30,8 @@ all() ->
      t_insert_requests_all_data_types,
      t_insert_requests_all_time_units,
      t_insert_requests_metric_formats,
-     t_write_sparse_and_non_sparse].
+     t_write_sparse_and_non_sparse,
+     t_write_custom_ts_column].
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].
@@ -1049,6 +1050,73 @@ t_write_sparse_and_non_sparse(_) ->
     ?assertEqual(<<"room_e">>, GetValue(Row5, <<"location">>)),
     ?assertEqual(<<"annex">>, GetValue(Row5, <<"building">>)),
     ?assertEqual(<<"maintenance">>, GetValue(Row5, <<"status">>)), % Present
+
+    greptimedb:stop_client(Client),
+    ok.
+
+t_write_custom_ts_column(_) ->
+    %% Test writing with custom timestamp column name
+    Metric = <<"custom_ts_test">>,
+    drop_table(Metric),
+
+    %% Define custom timestamp column name
+    CustomTsColumn = <<"event_time">>,
+
+    Points = [
+        #{fields => #{<<"temperature">> => 25.5, <<"humidity">> => 60.0},
+          tags => #{<<"sensor_id">> => <<"sensor_001">>, <<"location">> => <<"room_a">>},
+          timestamp => 1619775142000},
+        #{fields => #{<<"temperature">> => 26.0, <<"humidity">> => 65.0},
+          tags => #{<<"sensor_id">> => <<"sensor_002">>, <<"location">> => <<"room_b">>},
+          timestamp => 1619775143000}
+    ],
+
+    %% Create client with custom ts_column option
+    Host = greptime_host(),
+    Options = [
+        {endpoints, [{http, Host, 4001}]},
+        {pool, greptimedb_client_pool_custom_ts},
+        {pool_size, 3},
+        {pool_type, random},
+        {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}},
+        {ts_column, CustomTsColumn}
+    ],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+
+    %% Write with custom timestamp column
+    {ok, #{response := {affected_rows, #{value := 2}}}} =
+        greptimedb:write(Client, Metric, Points),
+
+    %% Verify the data was written with custom timestamp column
+    QueryResult = execute_sql_query(
+        io_lib:format("SELECT event_time, sensor_id, location, temperature, humidity FROM ~s ORDER BY event_time ASC", [Metric]),
+        <<"output">>
+    ),
+
+    %% Parse and verify the result
+    JsonTerm = jsx:decode(QueryResult, [return_maps]),
+    [#{<<"records">> := #{<<"rows">> := Rows}}] = JsonTerm,
+
+    ?assertEqual(2, length(Rows)),
+    [Row1, Row2] = Rows,
+
+    %% Verify first row
+    [Ts1, SensorId1, Location1, Temp1, Humidity1] = Row1,
+    ?assertEqual(1619775142000, Ts1),
+    ?assertEqual(<<"sensor_001">>, SensorId1),
+    ?assertEqual(<<"room_a">>, Location1),
+    ?assertEqual(25.5, Temp1),
+    ?assertEqual(60.0, Humidity1),
+
+    %% Verify second row
+    [Ts2, SensorId2, Location2, Temp2, Humidity2] = Row2,
+    ?assertEqual(1619775143000, Ts2),
+    ?assertEqual(<<"sensor_002">>, SensorId2),
+    ?assertEqual(<<"room_b">>, Location2),
+    ?assertEqual(26.0, Temp2),
+    ?assertEqual(65.0, Humidity2),
 
     greptimedb:stop_client(Client),
     ok.

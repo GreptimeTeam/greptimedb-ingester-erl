@@ -78,9 +78,10 @@ insert_requests(#{cli_opts := Options} = Client,
 make_row_insert_request(_Options,
                         #{dbname := DbName,
                           table := Table,
-                          timeunit := Timeunit},
+                          timeunit := Timeunit,
+                          ts_column := TsColumn},
                         Points) ->
-    {Schema, Rows} = convert_to_rows(Timeunit, Points),
+    {Schema, Rows} = convert_to_rows(Timeunit, TsColumn, Points),
     {DbName, #{table_name => Table, rows => #{schema => Schema, rows => Rows}}}.
 
 %%%===================================================================
@@ -92,7 +93,8 @@ metric(Options, Metric) ->
 
 default_metric(Options) ->
     #{dbname => proplists:get_value(dbname, Options, ?DEFAULT_DBNAME),
-      timeunit => proplists:get_value(timeunit, Options, ms)}.
+      timeunit => proplists:get_value(timeunit, Options, ms),
+      ts_column => proplists:get_value(ts_column, Options, ?TS_COLUMN)}.
 
 metric_with_default(Default, #{table := _} = Metric) ->
     maps:merge(Default, Metric);
@@ -109,13 +111,14 @@ metric_with_default(Default, Table)
 %% converts each point to a row following the schema order.
 %%
 %% @param Timeunit Time unit for timestamp columns (ns, us, ms, s)
+%% @param TsColumn Timestamp column name
 %% @param Points List of data points
 %% @returns {Schema, Rows} tuple
-convert_to_rows(Timeunit, Points) ->
-    Schema = create_schema(Timeunit, Points),
+convert_to_rows(Timeunit, TsColumn, Points) ->
+    Schema = create_schema(Timeunit, TsColumn, Points),
     %% Construct column index：Name -> {Index, SemanticType, DataType}
     IndexMap = index_schema(Schema),
-    Rows = [point_to_row_sparse(Timeunit, Point, IndexMap) || Point <- Points],
+    Rows = [point_to_row_sparse(Timeunit, TsColumn, Point, IndexMap) || Point <- Points],
     {Schema, Rows}.
 
 %% @private
@@ -125,13 +128,14 @@ convert_to_rows(Timeunit, Points) ->
 %% schema with column names, datatypes, and semantic types.
 %%
 %% @param Timeunit Time unit for timestamp columns
+%% @param TsColumn Timestamp column name
 %% @param Points List of data points
 %% @returns List of column schema maps
-create_schema(Timeunit, Points) ->
+create_schema(Timeunit, TsColumn, Points) ->
     % Collect all unique column info from all points
     AllColumns =
         lists:foldl(fun(Point, Acc) ->
-                       Columns = extract_columns_info(Timeunit, Point),
+                       Columns = extract_columns_info(Timeunit, TsColumn, Point),
                        merge_column_info(Columns, Acc)
                     end,
                     #{},
@@ -146,13 +150,15 @@ create_schema(Timeunit, Points) ->
 %%
 %%
 %% @param Timeunit Time unit for timestamp columns
+%% @param TsColumn Timestamp column name
 %% @param Point Map with fields, tags, and timestamp
 %% @returns Map of column_name -> column schema
 extract_columns_info(Timeunit,
+                     TsColumn,
                      #{fields := Fields,
                        tags := Tags,
                        timestamp := Ts}) ->
-    TsInfo = ts_column_info(Timeunit, Ts),
+    TsInfo = ts_column_info(Timeunit, TsColumn, Ts),
 
     FieldPairs =
         maps:fold(fun(Name, V, Acc) -> [{Name, field_column_info(Name, V)} | Acc] end,
@@ -164,7 +170,7 @@ extract_columns_info(Timeunit,
 
     % Ensure "tags override fields" semantics: put TagPairs last (in from_list, last occurrence wins)
     % Reverse to maintain original order within fields and tags
-    Pairs = [{?TS_COLUMN, TsInfo}] ++ lists:reverse(FieldPairs) ++ lists:reverse(TagPairs),
+    Pairs = [{TsColumn, TsInfo}] ++ lists:reverse(FieldPairs) ++ lists:reverse(TagPairs),
     maps:from_list(Pairs).
 
 %% @private
@@ -222,7 +228,7 @@ index_schema(Schema) ->
 %% @private
 %% @doc Sparse-friendly row builder using the prebuilt IndexMap.
 %% Only fills present fields/tags/timestamp; others remain as shared empty map.
-point_to_row_sparse(Timeunit, Point0, IndexMap) ->
+point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
     Fields = maps:get(fields, Point0, #{}),
     Tags = maps:get(tags, Point0, #{}),
     Ts = maps:get(timestamp, Point0),
@@ -232,7 +238,7 @@ point_to_row_sparse(Timeunit, Point0, IndexMap) ->
     T0 = erlang:make_tuple(N, #{}),
 
     %% timestamp
-    {TsIdx, 'TIMESTAMP', TsDT} = maps:get(?TS_COLUMN, IndexMap),
+    {TsIdx, 'TIMESTAMP', TsDT} = maps:get(TsColumn, IndexMap),
     TsVal = ts_row_value(Timeunit, TsDT, Ts),
     T1 = setelement(TsIdx, T0, TsVal),
 
@@ -276,15 +282,15 @@ point_to_row_sparse(Timeunit, Point0, IndexMap) ->
 
 %% Column info functions (for schema creation)
 
-ts_column_info(_Timeunit, Ts) when is_map(Ts) ->
+ts_column_info(_Timeunit, TsColumn, Ts) when is_map(Ts) ->
     % Infer datatype from the value_data structure
     DataType = infer_timestamp_datatype(Ts),
-    #{column_name => ?TS_COLUMN,
+    #{column_name => TsColumn,
       semantic_type => 'TIMESTAMP',
       datatype => DataType};
-ts_column_info(Timeunit, _Ts) ->
+ts_column_info(Timeunit, TsColumn, _Ts) ->
     DataType = ts_datatype(Timeunit),
-    #{column_name => ?TS_COLUMN,
+    #{column_name => TsColumn,
       semantic_type => 'TIMESTAMP',
       datatype => DataType}.
 
