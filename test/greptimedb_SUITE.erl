@@ -574,10 +574,6 @@ t_insert_greptime_cloud(_) ->
            ok
     end.
 
-%% ======================================================================
-%% New encoder-specific tests
-%% ======================================================================
-
 t_insert_requests_empty_points(_) ->
     Client = #{cli_opts => [{timeunit, ms}]},
     Request = greptimedb_encoder:insert_requests(Client, []),
