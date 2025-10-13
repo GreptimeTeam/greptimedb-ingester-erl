@@ -5,8 +5,6 @@
 
 An Erlang client library for [GreptimeDB](https://github.com/GreptimeTeam/greptimedb).
 
-> **Version Note**: 0.1.0 only works with GreptimeDB 0.2, otherwise use with the latest GreptimeDB releases.
-
 ## Table of Contents
 
 - [Quick Start](#quick-start)
