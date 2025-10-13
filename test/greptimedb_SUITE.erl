@@ -44,7 +44,7 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     application:stop(greptimedb).
 
-init_per_testcase(t_insert_greptime_cloud, Config) ->
+init_per_testcase(t_write_greptime_cloud, Config) ->
     Host = os:getenv("GT_TEST_HOST"),
     DbName = os:getenv("GT_TEST_DB"),
     UserName = os:getenv("GT_TEST_USER"),
@@ -664,10 +664,10 @@ t_write_greptime_cloud(_) ->
     PassWd = os:getenv("GT_TEST_PASSWD"),
 
     if (Host == false) or (DbName == false) or (UserName == false) or (PassWd == false) ->
-           ct:print("Ignored t_insert_greptime_cloud..."),
+           ct:print("Ignored t_write_greptime_cloud..."),
            ok;
        true ->
-           ct:print("Running t_insert_greptime_cloud..."),
+           ct:print("Running t_write_greptime_cloud..."),
            %% the endpoint scheme must be `https`.
            Options =
                [{endpoints, [{https, Host, 5001}]},
