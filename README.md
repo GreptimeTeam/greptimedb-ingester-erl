@@ -368,11 +368,16 @@ rebar3 do ct,eunit
 
 ## Performance
 
-Benchmark results:
+Benchmark results on local machine and db:
 
 ```
-Finish benchmark, 
+OS: Darwin MacBook-Pro.local 24.6.0 Darwin Kernel Version 24.6.0
+Chip: Apple M4 Max
+```
+
+```Finish benchmark:
   series: 5000, 
+  batch size: 100,
   concurrency: 10, 
   cost: 65 seconds,
   rows: 10000000,
