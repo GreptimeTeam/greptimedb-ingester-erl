@@ -5,6 +5,13 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% Test credential macros
+-define(TEST_USERNAME, "test").
+-define(TEST_PASSWORD, "test").
+-define(GREPTIME_USERNAME, <<"greptime_user">>).
+-define(GREPTIME_PASSWORD, <<"greptime_pwd">>).
+-define(WRONG_PASSWORD, <<"wrong_pwd">>).
+
 all() ->
     [t_write,
      t_write_stream,
@@ -22,7 +29,8 @@ all() ->
      t_insert_requests_all_sparse,
      t_insert_requests_all_data_types,
      t_insert_requests_all_time_units,
-     t_insert_requests_metric_formats].
+     t_insert_requests_metric_formats,
+     t_write_sparse_and_non_sparse].
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].
@@ -99,7 +107,7 @@ t_insert_requests(_) ->
            timestamp => 1619775144098}],
 
     Metric = "Test",
-    AuthInfo = {basic, #{username => "test", password => "test"}},
+    AuthInfo = {basic, #{username => ?TEST_USERNAME, password => ?TEST_PASSWORD}},
     Client = #{cli_opts => [{auth, AuthInfo}, {timeunit, second}]},
     Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
     case Request of
@@ -121,12 +129,13 @@ t_insert_requests(_) ->
                 lists:search(fun(C) -> maps:get(column_name, C) == <<"to">> end, Columns),
             ?assertEqual([<<"kafka">>, <<"kafka">>],
                          maps:get(string_values, maps:get(values, ToColumn))),
-            ?assertEqual(<<0:6/integer, 1:1/integer, 1:1/integer>>, maps:get(null_mask, ToColumn)),
+            ?assertEqual(<<0:5/integer, 0:1/integer, 0:1/integer, 1:1/integer>>,
+                         maps:get(null_mask, ToColumn)),
 
             {value, DeviceColumn} =
                 lists:search(fun(C) -> maps:get(column_name, C) == <<"device">> end, Columns),
             ?assertEqual([<<"NO.1">>], maps:get(string_values, maps:get(values, DeviceColumn))),
-            ?assertEqual(<<0:5/integer, 1:1/integer, 0:1/integer, 0:1/integer>>,
+            ?assertEqual(<<0:5/integer, 1:1/integer, 1:1/integer, 0:1/integer>>,
                          maps:get(null_mask, DeviceColumn)),
 
             {value, TimestampColumn} =
@@ -150,7 +159,7 @@ t_insert_requests_with_timeunit(_) ->
                  <<"device">> => <<"NO.1">>,
                  <<"region">> => <<"hangzhou">>},
            timestamp => TsNano}],
-    AuthInfo = {basic, #{username => "test", password => "test"}},
+    AuthInfo = {basic, #{username => ?TEST_USERNAME, password => ?TEST_PASSWORD}},
     Client = #{cli_opts => [{auth, AuthInfo}, {timeunit, second}]},
     Metric = #{table => "Test", timeunit => nanosecond},
     Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
@@ -186,7 +195,7 @@ t_write_failure(_) ->
          {pool, greptimedb_client_pool},
          {pool_size, 5},
          {pool_type, random},
-         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
     false = greptimedb:is_alive(Client),
@@ -210,6 +219,7 @@ t_write_failure(_) ->
 
 t_write(_) ->
     Metric = <<"temperatures">>,
+    drop_table(Metric),
     Points =
         [#{fields => #{<<"temperature">> => 1},
            tags =>
@@ -234,7 +244,7 @@ t_write(_) ->
          %% enable append mode and ttl
          {grpc_hints, #{<<"append_mode">> => <<"true">>, <<"ttl">> => <<"7 days">>}},
          {pool_type, random},
-         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
@@ -242,18 +252,74 @@ t_write(_) ->
         greptimedb:write(Client, Metric, Points),
 
     %% assert table options
-    Sql = "show create table temperatures",
-    EncodedSql = uri_string:quote(Sql),
-    URL = "http://" ++ Host ++ ":4000/v1/sql?sql=" ++ EncodedSql,
-    User = <<"greptime_user">>,
-    Pass = <<"greptime_pwd">>,
-    AuthBin = base64:encode(<<User/binary, ":", Pass/binary>>),
-    AuthHeader = {"authorization", <<"Basic ", AuthBin/binary>>},
+    ShowCreate = execute_sql_query("show create table temperatures"),
 
-    {ok, {{_, 200, _}, _, RespBody}} = httpc:request(get, {URL, [AuthHeader]}, [], []),
+    ?assert(string:find(ShowCreate, "ttl = '7days'") =/= nomatch),
+    ?assert(string:find(ShowCreate, "append_mode = 'true'") =/= nomatch),
 
-    ?assert(string:find(RespBody, "ttl = '7days'") =/= nomatch),
-    ?assert(string:find(RespBody, "append_mode = 'true'") =/= nomatch),
+    QueryResult =
+        execute_sql_query("SELECT * FROM temperatures ORDER BY greptime_timestamp DESC",
+                          <<"output">>),
+    ?assertEqual(<<"[
+  {
+    \"records\": {
+      \"rows\": [
+        [
+          1619775143098,
+          \"serverB\",
+          \"kafka\",
+          2.0,
+          1,
+          \"mqttx_4b963a8e\",
+          \"ningbo\"
+        ],
+        [
+          1619775142098,
+          \"serverA\",
+          null,
+          1.0,
+          0,
+          \"mqttx_4b963a8e\",
+          \"hangzhou\"
+        ]
+      ],
+      \"schema\": {
+        \"column_schemas\": [
+          {
+            \"data_type\": \"TimestampMillisecond\",
+            \"name\": \"greptime_timestamp\"
+          },
+          {
+            \"data_type\": \"String\",
+            \"name\": \"host\"
+          },
+          {
+            \"data_type\": \"String\",
+            \"name\": \"to\"
+          },
+          {
+            \"data_type\": \"Float64\",
+            \"name\": \"temperature\"
+          },
+          {
+            \"data_type\": \"Int64\",
+            \"name\": \"qos\"
+          },
+          {
+            \"data_type\": \"String\",
+            \"name\": \"from\"
+          },
+          {
+            \"data_type\": \"String\",
+            \"name\": \"region\"
+          }
+        ]
+      },
+      \"total_rows\": 2
+    }
+  }
+]">>,
+                 QueryResult),
 
     greptimedb:stop_client(Client),
     ok.
@@ -281,7 +347,7 @@ t_auth_error(_) ->
          {pool, greptimedb_client_pool},
          {pool_size, 5},
          {pool_type, random},
-         {auth, {basic, #{username => <<"greptime_user">>, password => <<"wrong_pwd">>}}}],
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?WRONG_PASSWORD}}}],
     {ok, Client} = greptimedb:start_client(Options),
 
     %% sync write
@@ -308,7 +374,7 @@ t_write_stream(_) ->
          {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
-         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
@@ -331,7 +397,7 @@ t_write_batch(_) ->
          {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
-         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
@@ -420,7 +486,7 @@ t_bench_perf(_) ->
          {pool_size, 8},
          {pool_type, random},
          {timeunit, ms},
-         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
@@ -511,7 +577,7 @@ t_async_write_batch(_) ->
          {pool, greptimedb_client_pool},
          {pool_size, 8},
          {pool_type, random},
-         {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}],
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
@@ -629,19 +695,19 @@ t_insert_requests_all_sparse(_) ->
     {value, Field1} =
         lists:search(fun(C) -> maps:get(column_name, C) == <<"field1">> end, Columns),
     ?assertEqual([1.0], maps:get(f64_values, maps:get(values, Field1))),
-    ?assertEqual(<<0:5, 1:1, 0:1, 0:1>>, maps:get(null_mask, Field1)),
+    ?assertEqual(<<0:5, 1:1, 1:1, 0:1>>, maps:get(null_mask, Field1)),
 
     % Check field2: only present in row 2
     {value, Field2} =
         lists:search(fun(C) -> maps:get(column_name, C) == <<"field2">> end, Columns),
     ?assertEqual([2.0], maps:get(f64_values, maps:get(values, Field2))),
-    ?assertEqual(<<0:5, 0:1, 1:1, 0:1>>, maps:get(null_mask, Field2)),
+    ?assertEqual(<<0:5, 1:1, 0:1, 1:1>>, maps:get(null_mask, Field2)),
 
     % Check field3: only present in row 3
     {value, Field3} =
         lists:search(fun(C) -> maps:get(column_name, C) == <<"field3">> end, Columns),
     ?assertEqual([3.0], maps:get(f64_values, maps:get(values, Field3))),
-    ?assertEqual(<<0:5, 0:1, 0:1, 1:1>>, maps:get(null_mask, Field3)).
+    ?assertEqual(<<0:5, 0:1, 1:1, 1:1>>, maps:get(null_mask, Field3)).
 
 t_insert_requests_all_data_types(_) ->
     Point =
@@ -805,3 +871,204 @@ t_insert_requests_metric_formats(_) ->
     {value, TsCol} =
         lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end, Columns),
     ?assertEqual('TIMESTAMP_SECOND', maps:get(datatype, TsCol)).
+
+%% Helper function to execute SQL query and return pretty-printed JSON
+execute_sql_query(Sql) ->
+    execute_sql_query(Sql, undefined).
+
+execute_sql_query(Sql, Key) ->
+    User = ?GREPTIME_USERNAME,
+    Pass = ?GREPTIME_PASSWORD,
+    EncodedSql = uri_string:quote(Sql),
+    URL = "http://" ++ greptime_host() ++ ":4000/v1/sql?sql=" ++ EncodedSql,
+    AuthBin = base64:encode(<<User/binary, ":", Pass/binary>>),
+    AuthHeader = {"authorization", <<"Basic ", AuthBin/binary>>},
+
+    {ok, {{_, 200, _}, _, RespBody}} = httpc:request(get, {URL, [AuthHeader]}, [], []),
+    % Parse JSON and pretty print
+    JsonTerm = jsx:decode(list_to_binary(RespBody), [return_maps]),
+    JsonTerm1 =
+        case Key of
+            undefined ->
+                JsonTerm;
+            _ ->
+                maps:get(Key, JsonTerm)
+        end,
+    jsx:prettify(
+        jsx:encode(JsonTerm1)).
+
+drop_table(Table) ->
+    Rows = execute_sql_query(<<"DROP TABLE IF EXISTS ", Table/binary>>, <<"output">>),
+    ?assertEqual(<<"[
+  {
+    \"affectedrows\": 0
+  }
+]">>, Rows).
+
+t_write_sparse_and_non_sparse(_) ->
+    Metric = <<"t_write_sparse_and_non_sparse">>,
+    drop_table(Metric),
+
+    %% Create mixed sparse and non-sparse points
+    %% Testing similar to t_write but with more systematic sparse patterns
+    Points =
+        [%% Point 1: Complete data with all common fields
+         #{fields => #{<<"temperature">> => 25.5, <<"humidity">> => 60.0},
+           tags =>
+               #{<<"sensor_id">> => <<"sensor_001">>,
+                 <<"location">> => <<"room_a">>,
+                 <<"building">> => <<"main">>},
+           timestamp => 1619775142000},
+         %% Point 2: Missing optional building tag
+         #{fields => #{<<"temperature">> => 26.0, <<"humidity">> => 65.0},
+           tags => #{<<"sensor_id">> => <<"sensor_002">>, <<"location">> => <<"room_b">>},
+           timestamp => 1619775143000},
+         %% Point 3: Missing humidity field and building tag
+         #{fields => #{<<"temperature">> => 24.0},
+           tags => #{<<"sensor_id">> => <<"sensor_003">>, <<"location">> => <<"room_c">>},
+           timestamp => 1619775144000},
+         %% Point 4: Has extra optional pressure field and status tag
+         #{fields =>
+               #{<<"temperature">> => 22.0,
+                 <<"humidity">> => 55.0,
+                 <<"pressure">> => 1013.0},
+           tags =>
+               #{<<"sensor_id">> => <<"sensor_004">>,
+                 <<"location">> => <<"room_d">>,
+                 <<"status">> => <<"active">>},
+           timestamp => 1619775145000},
+         %% Point 5: Similar to point 1 but with extra status tag
+         #{fields => #{<<"temperature">> => 27.0, <<"humidity">> => 68.0},
+           tags =>
+               #{<<"sensor_id">> => <<"sensor_005">>,
+                 <<"location">> => <<"room_e">>,
+                 <<"building">> => <<"annex">>,
+                 <<"status">> => <<"maintenance">>},
+           timestamp => 1619775146000}],
+
+    Host = greptime_host(),
+    Options =
+        [{endpoints, [{http, Host, 4001}]},
+         {pool, greptimedb_client_pool},
+         {pool_size, 5},
+         {pool_type, random},
+         {timeunit, ms},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+
+    %% Write the mixed sparse/non-sparse data
+    {ok, #{response := {affected_rows, #{value := 5}}}} =
+        greptimedb:write(Client, Metric, Points),
+
+    %% Query back the data to verify correctness
+    QueryResult =
+        execute_sql_query("SELECT * FROM t_write_sparse_and_non_sparse ORDER BY greptime_timestamp ASC",
+                          <<"output">>),
+
+    %% Parse the JSON response to verify the data
+    JsonTerm = jsx:decode(QueryResult, [return_maps]),
+    [#{<<"records">> := #{<<"rows">> := Rows, <<"schema">> := Schema}}] = JsonTerm,
+
+    %% Verify we have 5 rows
+    ?assertEqual(5, length(Rows)),
+
+    %% Extract column names from schema for easier verification
+    #{<<"column_schemas">> := ColumnSchemas} = Schema,
+    ColumnNames = [maps:get(<<"name">>, Col) || Col <- ColumnSchemas],
+
+    %% Create a helper function to get column index
+    GetColIndex =
+        fun(ColName) ->
+           Zipped =
+               lists:zip(
+                   lists:seq(1, length(ColumnNames)), ColumnNames),
+           case lists:keyfind(ColName, 2, Zipped) of
+               {Index, _Name} ->
+                   Index;
+               false ->
+                   not_found
+           end
+        end,
+
+    %% Verify column presence - should have all fields and tags that were used
+    ExpectedColumns =
+        [<<"greptime_timestamp">>,
+         <<"temperature">>,
+         <<"humidity">>,
+         <<"pressure">>,
+         <<"sensor_id">>,
+         <<"location">>,
+         <<"building">>,
+         <<"status">>],
+
+    lists:foreach(fun(ExpectedCol) -> ?assert(lists:member(ExpectedCol, ColumnNames)) end,
+                  ExpectedColumns),
+
+    %% Verify row data - check specific values and nulls
+    [Row1, Row2, Row3, Row4, Row5] = Rows,
+
+    %% Helper to get value from row by column name
+    GetValue =
+        fun(Row, ColName) ->
+           case GetColIndex(ColName) of
+               not_found ->
+                   not_found;
+               Index ->
+                   lists:nth(Index, Row)
+           end
+        end,
+
+    %% Verify Point 1 (complete baseline data)
+    ?assertEqual(1619775142000, GetValue(Row1, <<"greptime_timestamp">>)),
+    ?assertEqual(25.5, GetValue(Row1, <<"temperature">>)),
+    ?assertEqual(60.0, GetValue(Row1, <<"humidity">>)),
+    ?assertEqual(null, GetValue(Row1, <<"pressure">>)), % Not present in this point
+    ?assertEqual(<<"sensor_001">>, GetValue(Row1, <<"sensor_id">>)),
+    ?assertEqual(<<"room_a">>, GetValue(Row1, <<"location">>)),
+    ?assertEqual(<<"main">>, GetValue(Row1, <<"building">>)),
+    ?assertEqual(null, GetValue(Row1, <<"status">>)), % Not present in this point
+
+    %% Verify Point 2 (missing building tag)
+    ?assertEqual(1619775143000, GetValue(Row2, <<"greptime_timestamp">>)),
+    ?assertEqual(26.0, GetValue(Row2, <<"temperature">>)),
+    ?assertEqual(65.0, GetValue(Row2, <<"humidity">>)),
+    ?assertEqual(null, GetValue(Row2, <<"pressure">>)), % Not present
+    ?assertEqual(<<"sensor_002">>, GetValue(Row2, <<"sensor_id">>)),
+    ?assertEqual(<<"room_b">>, GetValue(Row2, <<"location">>)),
+    ?assertEqual(null, GetValue(Row2, <<"building">>)), % Sparse - not present
+    ?assertEqual(null, GetValue(Row2, <<"status">>)), % Not present
+
+    %% Verify Point 3 (missing humidity field and building tag)
+    ?assertEqual(1619775144000, GetValue(Row3, <<"greptime_timestamp">>)),
+    ?assertEqual(24.0, GetValue(Row3, <<"temperature">>)),
+    ?assertEqual(null, GetValue(Row3, <<"humidity">>)), % Sparse - not present
+    ?assertEqual(null, GetValue(Row3, <<"pressure">>)), % Not present
+    ?assertEqual(<<"sensor_003">>, GetValue(Row3, <<"sensor_id">>)),
+    ?assertEqual(<<"room_c">>, GetValue(Row3, <<"location">>)),
+    ?assertEqual(null, GetValue(Row3, <<"building">>)), % Sparse - not present
+    ?assertEqual(null, GetValue(Row3, <<"status">>)), % Not present
+
+    %% Verify Point 4 (has extra pressure field and status tag)
+    ?assertEqual(1619775145000, GetValue(Row4, <<"greptime_timestamp">>)),
+    ?assertEqual(22.0, GetValue(Row4, <<"temperature">>)),
+    ?assertEqual(55.0, GetValue(Row4, <<"humidity">>)),
+    ?assertEqual(1013.0, GetValue(Row4, <<"pressure">>)), % Extra field present
+    ?assertEqual(<<"sensor_004">>, GetValue(Row4, <<"sensor_id">>)),
+    ?assertEqual(<<"room_d">>, GetValue(Row4, <<"location">>)),
+    ?assertEqual(null, GetValue(Row4, <<"building">>)), % Not present
+    ?assertEqual(<<"active">>, GetValue(Row4, <<"status">>)), % Extra tag present
+
+    %% Verify Point 5 (complete with all optional fields)
+    ?assertEqual(1619775146000, GetValue(Row5, <<"greptime_timestamp">>)),
+    ?assertEqual(27.0, GetValue(Row5, <<"temperature">>)),
+    ?assertEqual(68.0, GetValue(Row5, <<"humidity">>)),
+    ?assertEqual(null, GetValue(Row5, <<"pressure">>)), % Not present in this point
+    ?assertEqual(<<"sensor_005">>, GetValue(Row5, <<"sensor_id">>)),
+    ?assertEqual(<<"room_e">>, GetValue(Row5, <<"location">>)),
+    ?assertEqual(<<"annex">>, GetValue(Row5, <<"building">>)),
+    ?assertEqual(<<"maintenance">>, GetValue(Row5, <<"status">>)), % Present
+
+    greptimedb:stop_client(Client),
+    ok.
