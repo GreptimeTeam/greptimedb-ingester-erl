@@ -116,7 +116,7 @@ metric_with_default(Default, Table)
 %% @returns {Schema, Rows} tuple
 convert_to_rows(Timeunit, TsColumn, Points) ->
     Schema = create_schema(Timeunit, TsColumn, Points),
-    %% Construct column index：Name -> {Index, SemanticType, DataType}
+    %% Construct column index: Name -> {Index, SemanticType, DataType}
     IndexMap = index_schema(Schema),
     Rows = [point_to_row_sparse(Timeunit, TsColumn, Point, IndexMap) || Point <- Points],
     {Schema, Rows}.
@@ -234,7 +234,7 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
     Ts = maps:get(timestamp, Point0),
 
     N = maps:size(IndexMap),
-    %% Pre‑initialize the default value as an empty map (shared single object to avoid N allocations)
+    %% Pre-initialize the default value as an empty map (shared single object to avoid N allocations)
     T0 = erlang:make_tuple(N, #{}),
 
     %% timestamp

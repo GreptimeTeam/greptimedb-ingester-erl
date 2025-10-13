@@ -20,7 +20,7 @@ all() ->
      t_bench_perf,
      t_write_stream,
      t_async_write_batch,
-     t_insert_greptime_cloud,
+     t_write_greptime_cloud,
      t_auth_error,
      t_insert_requests,
      t_insert_requests_with_timeunit,
@@ -119,24 +119,92 @@ t_insert_requests(_) ->
             ?assertEqual(3, length(Rows)),
             ?assertEqual(Auth, #{auth_scheme => AuthInfo}),
 
-            % Verify schema contains correct columns
-            SchemaNames = [maps:get(column_name, S) || S <- Schema],
-            ?assert(lists:member(<<"greptime_timestamp">>, SchemaNames)),
-            ?assert(lists:member(<<"temperature">>, SchemaNames)),
-            ?assert(lists:member(<<"qos">>, SchemaNames)),
-            ?assert(lists:member(<<"to">>, SchemaNames)),
-            ?assert(lists:member(<<"device">>, SchemaNames)),
+            ColumnNames = [maps:get(column_name, S) || S <- Schema],
+            ?assert(lists:member(<<"greptime_timestamp">>, ColumnNames)),
+            ?assert(lists:member(<<"temperature">>, ColumnNames)),
+            ?assert(lists:member(<<"qos">>, ColumnNames)),
+            ?assert(lists:member(<<"to">>, ColumnNames)),
+            ?assert(lists:member(<<"device">>, ColumnNames)),
 
-            % Verify first row
-            #{values := Values1} = lists:nth(1, Rows),
-            ?assertEqual(8, length(Values1)),
+            %% Create a helper function to get column index
+            GetColumnIndex =
+                fun(ColName) ->
+                   Zipped =
+                       lists:zip(
+                           lists:seq(1, length(ColumnNames)), ColumnNames),
+                   case lists:keyfind(ColName, 2, Zipped) of
+                       {Index, _Name} ->
+                           Index;
+                       false ->
+                           not_found
+                   end
+                end,
 
-            % Verify row values match expected data
+            % Get column indices
+            TsIdx = GetColumnIndex(<<"greptime_timestamp">>),
+            TempIdx = GetColumnIndex(<<"temperature">>),
+            HostIdx = GetColumnIndex(<<"host">>),
+            RegionIdx = GetColumnIndex(<<"region">>),
+            QosIdx = GetColumnIndex(<<"qos">>),
+            ToIdx = GetColumnIndex(<<"to">>),
+            DeviceIdx = GetColumnIndex(<<"device">>),
+            FromIdx = GetColumnIndex(<<"from">>),
+
             [Row1, Row2, Row3] = Rows,
-            % Each row should have values corresponding to schema order
-            ?assertMatch(#{values := [_, _, _, _, _, _, _, _]}, Row1),
-            ?assertMatch(#{values := [_, _, _, _, _, _, _, _]}, Row2),
-            ?assertMatch(#{values := [_, _, _, _, _, _, _, _]}, Row3);
+            #{values := Values1} = Row1,
+            #{values := Values2} = Row2,
+            #{values := Values3} = Row3,
+
+            ?assertEqual(8, length(Values1)),
+            ?assertEqual(8, length(Values2)),
+            ?assertEqual(8, length(Values3)),
+
+            % Verify row 1 content
+            ?assertEqual(#{value_data => {timestamp_second_value, 1619775142098}},
+                         lists:nth(TsIdx, Values1)),
+            ?assertEqual(#{value_data => {f64_value, 1}}, lists:nth(TempIdx, Values1)),
+            ?assertEqual(#{value_data => {string_value, <<"serverA">>}},
+                         lists:nth(HostIdx, Values1)),
+            ?assertEqual(#{value_data => {string_value, <<"hangzhou">>}},
+                         lists:nth(RegionIdx, Values1)),
+            ?assertEqual(#{value_data => {string_value, "0"}}, lists:nth(QosIdx, Values1)),
+            ?assertEqual(#{}, lists:nth(ToIdx, Values1)),  % Row 1 doesn't have "to" field (sparse)
+            ?assertEqual(#{value_data => {string_value, <<"NO.1">>}},
+                         lists:nth(DeviceIdx, Values1)),
+            ?assertEqual(#{value_data => {string_value, <<"mqttx_4b963a8e">>}},
+                         lists:nth(FromIdx, Values1)),
+
+            % Verify row 2 content
+            ?assertEqual(#{value_data => {timestamp_second_value, 1619775143098}},
+                         lists:nth(TsIdx, Values2)),
+            ?assertEqual(#{value_data => {f64_value, 2}}, lists:nth(TempIdx, Values2)),
+            ?assertEqual(#{value_data => {string_value, <<"serverB">>}},
+                         lists:nth(HostIdx, Values2)),
+            ?assertEqual(#{value_data => {string_value, <<"ningbo">>}},
+                         lists:nth(RegionIdx, Values2)),
+            ?assertEqual(#{value_data => {string_value, "1"}}, lists:nth(QosIdx, Values2)),
+            ?assertEqual(#{value_data => {string_value, <<"kafka">>}}, lists:nth(ToIdx, Values2)),
+            ?assertEqual(#{},
+                         lists:nth(DeviceIdx,
+                                   Values2)),  % Row 2 doesn't have "device" field (sparse)
+            ?assertEqual(#{value_data => {string_value, <<"mqttx_4b963a8e">>}},
+                         lists:nth(FromIdx, Values2)),
+
+            % Verify row 3 content
+            ?assertEqual(#{value_data => {timestamp_second_value, 1619775144098}},
+                         lists:nth(TsIdx, Values3)),
+            ?assertEqual(#{value_data => {f64_value, 3}}, lists:nth(TempIdx, Values3)),
+            ?assertEqual(#{value_data => {string_value, <<"serverB">>}},
+                         lists:nth(HostIdx, Values3)),
+            ?assertEqual(#{value_data => {string_value, <<"xiamen">>}},
+                         lists:nth(RegionIdx, Values3)),
+            ?assertEqual(#{value_data => {string_value, "2"}}, lists:nth(QosIdx, Values3)),
+            ?assertEqual(#{value_data => {string_value, <<"kafka">>}}, lists:nth(ToIdx, Values3)),
+            ?assertEqual(#{},
+                         lists:nth(DeviceIdx,
+                                   Values3)),  % Row 3 doesn't have "device" field (sparse)
+            ?assertEqual(#{value_data => {string_value, <<"mqttx_4b963a8e">>}},
+                         lists:nth(FromIdx, Values3));
         _ ->
             ?assert(false)
     end,
@@ -397,7 +465,7 @@ t_write_batch(_) ->
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
 
-    Metric = <<"temperatures_">>,
+    Metric = <<"temperatures_batch">>,
     MetricAndPoints =
         lists:map(fun(N) ->
                      Points = points(N),
@@ -591,7 +659,7 @@ t_async_write_batch(_) ->
     greptimedb:stop_client(Client),
     ok.
 
-t_insert_greptime_cloud(_) ->
+t_write_greptime_cloud(_) ->
     Host = os:getenv("GT_TEST_HOST"),
     DbName = os:getenv("GT_TEST_DB"),
     UserName = os:getenv("GT_TEST_USER"),
@@ -657,11 +725,10 @@ t_insert_requests_single_point(_) ->
     ?assertEqual(3, length(Schema)), % temp, sensor, timestamp
     ?assertEqual(1, length(Rows)),
 
-    % Verify schema
-    SchemaNames = [maps:get(column_name, S) || S <- Schema],
-    ?assert(lists:member(<<"greptime_timestamp">>, SchemaNames)),
-    ?assert(lists:member(<<"temp">>, SchemaNames)),
-    ?assert(lists:member(<<"sensor">>, SchemaNames)).
+    ColumnNames = [maps:get(column_name, S) || S <- Schema],
+    ?assert(lists:member(<<"greptime_timestamp">>, ColumnNames)),
+    ?assert(lists:member(<<"temp">>, ColumnNames)),
+    ?assert(lists:member(<<"sensor">>, ColumnNames)).
 
 t_insert_requests_all_sparse(_) ->
     Points =
@@ -688,21 +755,75 @@ t_insert_requests_all_sparse(_) ->
     ?assertEqual(7, length(Schema)), % 3 fields + 3 tags + timestamp
     ?assertEqual(3, length(Rows)),
 
-    % Verify schema contains all expected columns
-    SchemaNames = [maps:get(column_name, S) || S <- Schema],
-    ?assert(lists:member(<<"field1">>, SchemaNames)),
-    ?assert(lists:member(<<"field2">>, SchemaNames)),
-    ?assert(lists:member(<<"field3">>, SchemaNames)),
-    ?assert(lists:member(<<"tag1">>, SchemaNames)),
-    ?assert(lists:member(<<"tag2">>, SchemaNames)),
-    ?assert(lists:member(<<"tag3">>, SchemaNames)),
-    ?assert(lists:member(<<"greptime_timestamp">>, SchemaNames)),
+    ColumnNames = [maps:get(column_name, S) || S <- Schema],
+    ?assert(lists:member(<<"field1">>, ColumnNames)),
+    ?assert(lists:member(<<"field2">>, ColumnNames)),
+    ?assert(lists:member(<<"field3">>, ColumnNames)),
+    ?assert(lists:member(<<"tag1">>, ColumnNames)),
+    ?assert(lists:member(<<"tag2">>, ColumnNames)),
+    ?assert(lists:member(<<"tag3">>, ColumnNames)),
+    ?assert(lists:member(<<"greptime_timestamp">>, ColumnNames)),
 
-    % Verify each row has correct number of values
+    GetColumnIndex =
+        fun(ColName) ->
+           Zipped =
+               lists:zip(
+                   lists:seq(1, length(ColumnNames)), ColumnNames),
+           case lists:keyfind(ColName, 2, Zipped) of
+               {Index, _Name} ->
+                   Index;
+               false ->
+                   not_found
+           end
+        end,
+
+    % Get column indices
+    TsIdx = GetColumnIndex(<<"greptime_timestamp">>),
+    Field1Idx = GetColumnIndex(<<"field1">>),
+    Field2Idx = GetColumnIndex(<<"field2">>),
+    Field3Idx = GetColumnIndex(<<"field3">>),
+    Tag1Idx = GetColumnIndex(<<"tag1">>),
+    Tag2Idx = GetColumnIndex(<<"tag2">>),
+    Tag3Idx = GetColumnIndex(<<"tag3">>),
+
     [Row1, Row2, Row3] = Rows,
-    ?assertEqual(7, length(maps:get(values, Row1))),
-    ?assertEqual(7, length(maps:get(values, Row2))),
-    ?assertEqual(7, length(maps:get(values, Row3))).
+    #{values := Values1} = Row1,
+    #{values := Values2} = Row2,
+    #{values := Values3} = Row3,
+
+    ?assertEqual(7, length(Values1)),
+    ?assertEqual(7, length(Values2)),
+    ?assertEqual(7, length(Values3)),
+
+    % Verify row 1 content (only field1 and tag1 should have values)
+    ?assertEqual(#{value_data => {timestamp_second_value, 1000000000}},
+                 lists:nth(TsIdx, Values1)),
+    ?assertEqual(#{value_data => {f64_value, 1.0}}, lists:nth(Field1Idx, Values1)),
+    ?assertEqual(#{}, lists:nth(Field2Idx, Values1)),  % sparse: not present
+    ?assertEqual(#{}, lists:nth(Field3Idx, Values1)),  % sparse: not present
+    ?assertEqual(#{value_data => {string_value, <<"value1">>}}, lists:nth(Tag1Idx, Values1)),
+    ?assertEqual(#{}, lists:nth(Tag2Idx, Values1)),    % sparse: not present
+    ?assertEqual(#{}, lists:nth(Tag3Idx, Values1)),    % sparse: not present
+
+    % Verify row 2 content (only field2 and tag2 should have values)
+    ?assertEqual(#{value_data => {timestamp_second_value, 1000000001}},
+                 lists:nth(TsIdx, Values2)),
+    ?assertEqual(#{}, lists:nth(Field1Idx, Values2)),  % sparse: not present
+    ?assertEqual(#{value_data => {f64_value, 2.0}}, lists:nth(Field2Idx, Values2)),
+    ?assertEqual(#{}, lists:nth(Field3Idx, Values2)),  % sparse: not present
+    ?assertEqual(#{}, lists:nth(Tag1Idx, Values2)),    % sparse: not present
+    ?assertEqual(#{value_data => {string_value, <<"value2">>}}, lists:nth(Tag2Idx, Values2)),
+    ?assertEqual(#{}, lists:nth(Tag3Idx, Values2)),    % sparse: not present
+
+    % Verify row 3 content (only field3 and tag3 should have values)
+    ?assertEqual(#{value_data => {timestamp_second_value, 1000000002}},
+                 lists:nth(TsIdx, Values3)),
+    ?assertEqual(#{}, lists:nth(Field1Idx, Values3)),  % sparse: not present
+    ?assertEqual(#{}, lists:nth(Field2Idx, Values3)),  % sparse: not present
+    ?assertEqual(#{value_data => {f64_value, 3.0}}, lists:nth(Field3Idx, Values3)),
+    ?assertEqual(#{}, lists:nth(Tag1Idx, Values3)),    % sparse: not present
+    ?assertEqual(#{}, lists:nth(Tag2Idx, Values3)),    % sparse: not present
+    ?assertEqual(#{value_data => {string_value, <<"value3">>}}, lists:nth(Tag3Idx, Values3)).
 
 t_insert_requests_all_data_types(_) ->
     Point =
@@ -765,7 +886,6 @@ t_insert_requests_all_data_types(_) ->
         lists:search(fun(S) -> maps:get(column_name, S) == <<"greptime_timestamp">> end, Schema),
     ?assertEqual('TIMESTAMP_NANOSECOND', maps:get(datatype, TsSchema)),
 
-    % Verify row has correct values
     [Row] = Rows,
     #{values := Values} = Row,
     ?assertEqual(11, length(Values)).
@@ -891,7 +1011,6 @@ t_write_sparse_and_non_sparse(_) ->
     drop_table(Metric),
 
     %% Create mixed sparse and non-sparse points
-    %% Testing similar to t_write but with more systematic sparse patterns
     Points =
         [%% Point 1: Complete data with all common fields
          #{fields => #{<<"temperature">> => 25.5, <<"humidity">> => 60.0},
@@ -943,23 +1062,18 @@ t_write_sparse_and_non_sparse(_) ->
     {ok, #{response := {affected_rows, #{value := 5}}}} =
         greptimedb:write(Client, Metric, Points),
 
-    %% Query back the data to verify correctness
     QueryResult =
         execute_sql_query("SELECT * FROM t_write_sparse_and_non_sparse ORDER BY greptime_timestamp ASC",
                           <<"output">>),
 
-    %% Parse the JSON response to verify the data
     JsonTerm = jsx:decode(QueryResult, [return_maps]),
     [#{<<"records">> := #{<<"rows">> := Rows, <<"schema">> := Schema}}] = JsonTerm,
 
-    %% Verify we have 5 rows
     ?assertEqual(5, length(Rows)),
 
-    %% Extract column names from schema for easier verification
     #{<<"column_schemas">> := ColumnSchemas} = Schema,
     ColumnNames = [maps:get(<<"name">>, Col) || Col <- ColumnSchemas],
 
-    %% Create a helper function to get column index
     GetColIndex =
         fun(ColName) ->
            Zipped =
@@ -973,7 +1087,6 @@ t_write_sparse_and_non_sparse(_) ->
            end
         end,
 
-    %% Verify column presence - should have all fields and tags that were used
     ExpectedColumns =
         [<<"greptime_timestamp">>,
          <<"temperature">>,
@@ -987,10 +1100,8 @@ t_write_sparse_and_non_sparse(_) ->
     lists:foreach(fun(ExpectedCol) -> ?assert(lists:member(ExpectedCol, ColumnNames)) end,
                   ExpectedColumns),
 
-    %% Verify row data - check specific values and nulls
     [Row1, Row2, Row3, Row4, Row5] = Rows,
 
-    %% Helper to get value from row by column name
     GetValue =
         fun(Row, ColName) ->
            case GetColIndex(ColName) of
@@ -1062,25 +1173,23 @@ t_write_custom_ts_column(_) ->
     %% Define custom timestamp column name
     CustomTsColumn = <<"event_time">>,
 
-    Points = [
-        #{fields => #{<<"temperature">> => 25.5, <<"humidity">> => 60.0},
-          tags => #{<<"sensor_id">> => <<"sensor_001">>, <<"location">> => <<"room_a">>},
-          timestamp => 1619775142000},
-        #{fields => #{<<"temperature">> => 26.0, <<"humidity">> => 65.0},
-          tags => #{<<"sensor_id">> => <<"sensor_002">>, <<"location">> => <<"room_b">>},
-          timestamp => 1619775143000}
-    ],
+    Points =
+        [#{fields => #{<<"temperature">> => 25.5, <<"humidity">> => 60.0},
+           tags => #{<<"sensor_id">> => <<"sensor_001">>, <<"location">> => <<"room_a">>},
+           timestamp => 1619775142000},
+         #{fields => #{<<"temperature">> => 26.0, <<"humidity">> => 65.0},
+           tags => #{<<"sensor_id">> => <<"sensor_002">>, <<"location">> => <<"room_b">>},
+           timestamp => 1619775143000}],
 
     %% Create client with custom ts_column option
     Host = greptime_host(),
-    Options = [
-        {endpoints, [{http, Host, 4001}]},
-        {pool, greptimedb_client_pool_custom_ts},
-        {pool_size, 3},
-        {pool_type, random},
-        {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}},
-        {ts_column, CustomTsColumn}
-    ],
+    Options =
+        [{endpoints, [{http, Host, 4001}]},
+         {pool, greptimedb_client_pool_custom_ts},
+         {pool_size, 3},
+         {pool_type, random},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}},
+         {ts_column, CustomTsColumn}],
 
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
@@ -1089,20 +1198,17 @@ t_write_custom_ts_column(_) ->
     {ok, #{response := {affected_rows, #{value := 2}}}} =
         greptimedb:write(Client, Metric, Points),
 
-    %% Verify the data was written with custom timestamp column
-    QueryResult = execute_sql_query(
-        io_lib:format("SELECT event_time, sensor_id, location, temperature, humidity FROM ~s ORDER BY event_time ASC", [Metric]),
-        <<"output">>
-    ),
+    QueryResult =
+        execute_sql_query(io_lib:format("SELECT event_time, sensor_id, location, temperature, humidity FROM ~s ORDER BY event_time ASC",
+                                        [Metric]),
+                          <<"output">>),
 
-    %% Parse and verify the result
     JsonTerm = jsx:decode(QueryResult, [return_maps]),
     [#{<<"records">> := #{<<"rows">> := Rows}}] = JsonTerm,
 
     ?assertEqual(2, length(Rows)),
     [Row1, Row2] = Rows,
 
-    %% Verify first row
     [Ts1, SensorId1, Location1, Temp1, Humidity1] = Row1,
     ?assertEqual(1619775142000, Ts1),
     ?assertEqual(<<"sensor_001">>, SensorId1),
@@ -1110,7 +1216,6 @@ t_write_custom_ts_column(_) ->
     ?assertEqual(25.5, Temp1),
     ?assertEqual(60.0, Humidity1),
 
-    %% Verify second row
     [Ts2, SensorId2, Location2, Temp2, Humidity2] = Row2,
     ?assertEqual(1619775143000, Ts2),
     ?assertEqual(<<"sensor_002">>, SensorId2),
