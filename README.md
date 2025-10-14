@@ -375,7 +375,8 @@ OS: Darwin MacBook-Pro.local 24.6.0 Darwin Kernel Version 24.6.0
 Chip: Apple M4 Max
 ```
 
-```Finish benchmark:
+```
+Finish benchmark:
   series: 5000, 
   batch size: 100,
   concurrency: 10, 
