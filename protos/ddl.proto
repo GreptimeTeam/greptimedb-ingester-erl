@@ -16,11 +16,11 @@ syntax = "proto3";
 
 package greptime.v1;
 
-option java_package = "io.greptime.v1";
-option java_outer_classname = "Ddl";
-option go_package = "github.com/GreptimeTeam/greptime-proto/go/greptime/v1";
-
 import "protos/common.proto";
+
+option go_package = "github.com/GreptimeTeam/greptime-proto/go/greptime/v1";
+option java_outer_classname = "Ddl";
+option java_package = "io.greptime.v1";
 
 // "Data Definition Language" requests, that create, modify or delete the
 // database structures but not the data. `DdlRequest` could carry more
@@ -30,10 +30,62 @@ message DdlRequest {
   oneof expr {
     CreateDatabaseExpr create_database = 1;
     CreateTableExpr create_table = 2;
-    AlterExpr alter = 3;
+    AlterTableExpr alter_table = 3;
     DropTableExpr drop_table = 4;
     TruncateTableExpr truncate_table = 7;
+    CreateFlowExpr create_flow = 8;
+    DropFlowExpr drop_flow = 9;
+    CreateViewExpr create_view = 10;
+    DropViewExpr drop_view = 11;
+    AlterDatabaseExpr alter_database = 12;
   }
+}
+
+// Create a flow to run the SQL when new data arrives.
+message CreateFlowExpr {
+  string catalog_name = 1;
+  string flow_name = 2;
+  repeated TableName source_table_names = 3;
+  TableName sink_table_name = 4;
+  bool or_replace = 5;
+  bool create_if_not_exists = 6;
+  // Expire data older than the given duration seconds.
+  ExpireAfter expire_after = 7;
+  EvalInterval eval_interval = 11;
+  string comment = 8;
+  string sql = 9;
+  map<string, string> flow_options = 10;
+}
+
+// Drop a flow.
+message DropFlowExpr {
+  string catalog_name = 1;
+  string flow_name = 2;
+  FlowId flow_id = 3;
+  bool drop_if_exists = 5;
+}
+
+// Create a view
+message CreateViewExpr {
+  string catalog_name = 1;
+  string schema_name = 2;
+  string view_name = 3;
+  bytes logical_plan = 4;
+  bool create_if_not_exists = 5;
+  bool or_replace = 6;
+  repeated TableName table_names = 7;
+  repeated string columns = 8;
+  repeated string plan_columns = 9;
+  string definition = 10;
+}
+
+// Drop a view
+message DropViewExpr {
+  string catalog_name = 1;
+  string schema_name = 2;
+  string view_name = 3;
+  TableId view_id = 4;
+  bool drop_if_exists = 5;
 }
 
 message CreateTableExpr {
@@ -50,7 +102,7 @@ message CreateTableExpr {
   string engine = 12;
 }
 
-message AlterExpr {
+message AlterTableExpr {
   string catalog_name = 1;
   string schema_name = 2;
   string table_name = 3;
@@ -58,6 +110,51 @@ message AlterExpr {
     AddColumns add_columns = 4;
     DropColumns drop_columns = 5;
     RenameTable rename_table = 6;
+    ModifyColumnTypes modify_column_types = 7;
+    SetTableOptions set_table_options = 8;
+    UnsetTableOptions unset_table_options = 11;
+    // Deprecated: use set_indexes instead.
+    SetIndex set_index = 12;
+    // Deprecated: use unset_indexes instead.
+    UnsetIndex unset_index = 13;
+    DropDefaults drop_defaults = 14;
+    SetIndexes set_indexes = 15;
+    UnsetIndexes unset_indexes = 16;
+    SetDefaults set_defaults = 17;
+  }
+}
+
+message DropDefault {
+  string column_name = 1;
+}
+
+message SetIndexes {
+  repeated SetIndex set_indexes = 1;
+}
+
+message UnsetIndexes {
+  repeated UnsetIndex unset_indexes = 1;
+}
+
+message SetDefault {
+  string column_name = 1;
+  // The JSON representation of the default `Expr`.
+  bytes default_constraint = 2;
+}
+
+message SetIndex {
+  oneof options {
+    SetFulltext fulltext = 1;
+    SetInverted inverted = 2;
+    SetSkipping skipping = 3;
+  }
+}
+
+message UnsetIndex {
+  oneof options {
+    UnsetFulltext fulltext = 1;
+    UnsetInverted inverted = 2;
+    UnsetSkipping skipping = 3;
   }
 }
 
@@ -70,9 +167,10 @@ message DropTableExpr {
 }
 
 message CreateDatabaseExpr {
-  string database_name = 1;
-  bool create_if_not_exists = 2;
-  map<string, string> options = 3;
+  string catalog_name = 1;
+  string schema_name = 2;
+  bool create_if_not_exists = 3;
+  map<string, string> options = 4;
 }
 
 message TruncateTableExpr {
@@ -80,22 +178,76 @@ message TruncateTableExpr {
   string schema_name = 2;
   string table_name = 3;
   TableId table_id = 4;
+  // if empty, truncate entire table, else only truncate time ranges
+  TimeRanges time_ranges = 5;
 }
 
-message AddColumns { repeated AddColumn add_columns = 1; }
+message DropDatabaseExpr {
+  string catalog_name = 1;
+  string schema_name = 2;
+  bool drop_if_exists = 3;
+}
 
-message DropColumns { repeated DropColumn drop_columns = 1; }
+message AddColumns {
+  repeated AddColumn add_columns = 1;
+}
 
-message RenameTable { string new_table_name = 1; }
+message DropDefaults {
+  repeated DropDefault drop_defaults = 1;
+}
+
+message SetDefaults {
+  repeated SetDefault set_defaults = 1;
+}
+
+message DropColumns {
+  repeated DropColumn drop_columns = 1;
+}
+
+message ModifyColumnTypes {
+  repeated ModifyColumnType modify_column_types = 1;
+}
+
+message RenameTable {
+  string new_table_name = 1;
+}
 
 message AddColumn {
   ColumnDef column_def = 1;
   AddColumnLocation location = 3;
+  bool add_if_not_exists = 4;
 }
 
-message DropColumn { string name = 1; }
+message ModifyColumnType {
+  string column_name = 1;
+  ColumnDataType target_type = 2;
+  ColumnDataTypeExtension target_type_extension = 3;
+}
 
-message TableId { uint32 id = 1; }
+message Option {
+  string key = 1;
+  string value = 2;
+}
+
+message SetTableOptions {
+  repeated Option table_options = 1;
+}
+
+message UnsetTableOptions {
+  repeated string keys = 1;
+}
+
+message DropColumn {
+  string name = 1;
+}
+
+message TableId {
+  uint32 id = 1;
+}
+
+message FlowId {
+  uint32 id = 1;
+}
 
 message ColumnDef {
   string name = 1;
@@ -104,8 +256,12 @@ message ColumnDef {
   bytes default_constraint = 4;
   SemanticType semantic_type = 5;
   string comment = 6;
+
   // Extension for ColumnDataType.
   ColumnDataTypeExtension datatype_extension = 7;
+
+  // Additional column options.
+  ColumnOptions options = 8;
 }
 
 message AddColumnLocation {
@@ -115,4 +271,90 @@ message AddColumnLocation {
   }
   LocationType location_type = 1;
   string after_column_name = 2;
+}
+
+enum Analyzer {
+  ENGLISH = 0;
+  CHINESE = 1;
+}
+
+enum FulltextBackend {
+  TANTIVY = 0;
+  BLOOM = 1;
+}
+
+message SetFulltext {
+  string column_name = 1;
+  bool enable = 2;
+  Analyzer analyzer = 3;
+  bool case_sensitive = 4;
+  FulltextBackend backend = 5;
+  // The granularity for the fulltext index (for bloom backend only).
+  uint64 granularity = 6;
+  // The false positive rate for the fulltext index (for bloom backend only).
+  double false_positive_rate = 7;
+}
+
+message UnsetFulltext {
+  string column_name = 1;
+}
+
+message SetInverted {
+  string column_name = 1;
+}
+
+message UnsetInverted {
+  string column_name = 1;
+}
+
+enum SkippingIndexType {
+  BLOOM_FILTER = 0;
+}
+
+message SetSkipping {
+  string column_name = 1;
+  bool enable = 2;
+  uint64 granularity = 3;
+  SkippingIndexType skipping_index_type = 4;
+  double false_positive_rate = 5;
+}
+
+message UnsetSkipping {
+  string column_name = 1;
+}
+message AlterDatabaseExpr {
+  string catalog_name = 1;
+  string schema_name = 2;
+  oneof kind {
+    SetDatabaseOptions set_database_options = 3;
+    UnsetDatabaseOptions unset_database_options = 4;
+  }
+}
+
+message SetDatabaseOptions {
+  repeated Option set_database_options = 1;
+}
+
+message UnsetDatabaseOptions {
+  repeated string keys = 1;
+}
+
+// The notification channel for trigger.
+message NotifyChannel {
+  string name = 1;
+  oneof channel_type {
+    WebhookOptions webhook = 2;
+  }
+}
+
+// The options for webhook.
+message WebhookOptions {
+  string url = 1;
+  map<string, string> opts = 2;
+}
+
+message DropTriggerExpr {
+  string catalog_name = 1;
+  string trigger_name = 2;
+  bool drop_if_exists = 3;
 }

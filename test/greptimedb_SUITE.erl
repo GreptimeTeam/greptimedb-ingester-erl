@@ -20,7 +20,7 @@ all() ->
      t_bench_perf,
      t_write_stream,
      t_async_write_batch,
-     t_insert_greptime_cloud,
+     t_write_greptime_cloud,
      t_auth_error,
      t_insert_requests,
      t_insert_requests_with_timeunit,
@@ -30,7 +30,8 @@ all() ->
      t_insert_requests_all_data_types,
      t_insert_requests_all_time_units,
      t_insert_requests_metric_formats,
-     t_write_sparse_and_non_sparse].
+     t_write_sparse_and_non_sparse,
+     t_write_custom_ts_column].
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].
@@ -43,7 +44,7 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     application:stop(greptimedb).
 
-init_per_testcase(t_insert_greptime_cloud, Config) ->
+init_per_testcase(t_write_greptime_cloud, Config) ->
     Host = os:getenv("GT_TEST_HOST"),
     DbName = os:getenv("GT_TEST_DB"),
     UserName = os:getenv("GT_TEST_USER"),
@@ -112,37 +113,96 @@ t_insert_requests(_) ->
     Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
     case Request of
         #{header := #{dbname := DbName, authorization := Auth},
-          request := {inserts, #{inserts := [#{columns := Columns}]}}} ->
+          request := {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} ->
             ?assertEqual(DbName, "greptime-public"),
-            ?assertEqual(8, length(Columns)),
+            ?assertEqual(8, length(Schema)),
+            ?assertEqual(3, length(Rows)),
             ?assertEqual(Auth, #{auth_scheme => AuthInfo}),
 
-            {value, TemperatureColumn} =
-                lists:search(fun(C) -> maps:get(column_name, C) == <<"temperature">> end, Columns),
-            ?assertEqual([1, 2, 3], maps:get(f64_values, maps:get(values, TemperatureColumn))),
+            ColumnNames = [maps:get(column_name, S) || S <- Schema],
+            ?assert(lists:member(<<"greptime_timestamp">>, ColumnNames)),
+            ?assert(lists:member(<<"temperature">>, ColumnNames)),
+            ?assert(lists:member(<<"qos">>, ColumnNames)),
+            ?assert(lists:member(<<"to">>, ColumnNames)),
+            ?assert(lists:member(<<"device">>, ColumnNames)),
 
-            {value, QosColumn} =
-                lists:search(fun(C) -> maps:get(column_name, C) == <<"qos">> end, Columns),
-            ?assertEqual(["0", "1", "2"], maps:get(string_values, maps:get(values, QosColumn))),
+            GetColumnIndex =
+                fun(ColName) ->
+                   Zipped =
+                       lists:zip(
+                           lists:seq(1, length(ColumnNames)), ColumnNames),
+                   case lists:keyfind(ColName, 2, Zipped) of
+                       {Index, _Name} ->
+                           Index;
+                       false ->
+                           not_found
+                   end
+                end,
 
-            {value, ToColumn} =
-                lists:search(fun(C) -> maps:get(column_name, C) == <<"to">> end, Columns),
-            ?assertEqual([<<"kafka">>, <<"kafka">>],
-                         maps:get(string_values, maps:get(values, ToColumn))),
-            ?assertEqual(<<0:5/integer, 0:1/integer, 0:1/integer, 1:1/integer>>,
-                         maps:get(null_mask, ToColumn)),
+            TsIdx = GetColumnIndex(<<"greptime_timestamp">>),
+            TempIdx = GetColumnIndex(<<"temperature">>),
+            HostIdx = GetColumnIndex(<<"host">>),
+            RegionIdx = GetColumnIndex(<<"region">>),
+            QosIdx = GetColumnIndex(<<"qos">>),
+            ToIdx = GetColumnIndex(<<"to">>),
+            DeviceIdx = GetColumnIndex(<<"device">>),
+            FromIdx = GetColumnIndex(<<"from">>),
 
-            {value, DeviceColumn} =
-                lists:search(fun(C) -> maps:get(column_name, C) == <<"device">> end, Columns),
-            ?assertEqual([<<"NO.1">>], maps:get(string_values, maps:get(values, DeviceColumn))),
-            ?assertEqual(<<0:5/integer, 1:1/integer, 1:1/integer, 0:1/integer>>,
-                         maps:get(null_mask, DeviceColumn)),
+            [Row1, Row2, Row3] = Rows,
+            #{values := Values1} = Row1,
+            #{values := Values2} = Row2,
+            #{values := Values3} = Row3,
 
-            {value, TimestampColumn} =
-                lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end,
-                             Columns),
-            ?assertEqual([1619775142098, 1619775143098, 1619775144098],
-                         maps:get(timestamp_second_values, maps:get(values, TimestampColumn)));
+            ?assertEqual(8, length(Values1)),
+            ?assertEqual(8, length(Values2)),
+            ?assertEqual(8, length(Values3)),
+
+            % Verify row 1 content
+            ?assertEqual(#{value_data => {timestamp_second_value, 1619775142098}},
+                         lists:nth(TsIdx, Values1)),
+            ?assertEqual(#{value_data => {f64_value, 1}}, lists:nth(TempIdx, Values1)),
+            ?assertEqual(#{value_data => {string_value, <<"serverA">>}},
+                         lists:nth(HostIdx, Values1)),
+            ?assertEqual(#{value_data => {string_value, <<"hangzhou">>}},
+                         lists:nth(RegionIdx, Values1)),
+            ?assertEqual(#{value_data => {string_value, "0"}}, lists:nth(QosIdx, Values1)),
+            ?assertEqual(#{}, lists:nth(ToIdx, Values1)),  % Row 1 doesn't have "to" field (sparse)
+            ?assertEqual(#{value_data => {string_value, <<"NO.1">>}},
+                         lists:nth(DeviceIdx, Values1)),
+            ?assertEqual(#{value_data => {string_value, <<"mqttx_4b963a8e">>}},
+                         lists:nth(FromIdx, Values1)),
+
+            % Verify row 2 content
+            ?assertEqual(#{value_data => {timestamp_second_value, 1619775143098}},
+                         lists:nth(TsIdx, Values2)),
+            ?assertEqual(#{value_data => {f64_value, 2}}, lists:nth(TempIdx, Values2)),
+            ?assertEqual(#{value_data => {string_value, <<"serverB">>}},
+                         lists:nth(HostIdx, Values2)),
+            ?assertEqual(#{value_data => {string_value, <<"ningbo">>}},
+                         lists:nth(RegionIdx, Values2)),
+            ?assertEqual(#{value_data => {string_value, "1"}}, lists:nth(QosIdx, Values2)),
+            ?assertEqual(#{value_data => {string_value, <<"kafka">>}}, lists:nth(ToIdx, Values2)),
+            ?assertEqual(#{},
+                         lists:nth(DeviceIdx,
+                                   Values2)),  % Row 2 doesn't have "device" field (sparse)
+            ?assertEqual(#{value_data => {string_value, <<"mqttx_4b963a8e">>}},
+                         lists:nth(FromIdx, Values2)),
+
+            % Verify row 3 content
+            ?assertEqual(#{value_data => {timestamp_second_value, 1619775144098}},
+                         lists:nth(TsIdx, Values3)),
+            ?assertEqual(#{value_data => {f64_value, 3}}, lists:nth(TempIdx, Values3)),
+            ?assertEqual(#{value_data => {string_value, <<"serverB">>}},
+                         lists:nth(HostIdx, Values3)),
+            ?assertEqual(#{value_data => {string_value, <<"xiamen">>}},
+                         lists:nth(RegionIdx, Values3)),
+            ?assertEqual(#{value_data => {string_value, "2"}}, lists:nth(QosIdx, Values3)),
+            ?assertEqual(#{value_data => {string_value, <<"kafka">>}}, lists:nth(ToIdx, Values3)),
+            ?assertEqual(#{},
+                         lists:nth(DeviceIdx,
+                                   Values3)),  % Row 3 doesn't have "device" field (sparse)
+            ?assertEqual(#{value_data => {string_value, <<"mqttx_4b963a8e">>}},
+                         lists:nth(FromIdx, Values3));
         _ ->
             ?assert(false)
     end,
@@ -164,12 +224,13 @@ t_insert_requests_with_timeunit(_) ->
     Metric = #{table => "Test", timeunit => nanosecond},
     Request = greptimedb_encoder:insert_requests(Client, [{Metric, Points}]),
     #{header := #{dbname := _DbName, authorization := _Auth},
-      request := {inserts, #{inserts := [#{columns := Columns}]}}} =
+      request := {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} =
         Request,
-    {value, TimestampColumn} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end, Columns),
-    ?assertEqual([TsNano],
-                 maps:get(timestamp_nanosecond_values, maps:get(values, TimestampColumn))).
+    ?assertEqual(1, length(Rows)),
+    % Find timestamp column in schema
+    {value, TsSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"greptime_timestamp">> end, Schema),
+    ?assertEqual('TIMESTAMP_NANOSECOND', maps:get(datatype, TsSchema)).
 
 t_write_failure(_) ->
     Metric = <<"temperatures">>,
@@ -258,7 +319,7 @@ t_write(_) ->
     ?assert(string:find(ShowCreate, "append_mode = 'true'") =/= nomatch),
 
     QueryResult =
-        execute_sql_query("SELECT * FROM temperatures ORDER BY greptime_timestamp DESC",
+        execute_sql_query("SELECT greptime_timestamp,host,to,temperature,qos,`from`,region FROM temperatures ORDER BY greptime_timestamp DESC",
                           <<"output">>),
     ?assertEqual(<<"[
   {
@@ -402,7 +463,7 @@ t_write_batch(_) ->
     {ok, Client} = greptimedb:start_client(Options),
     true = greptimedb:is_alive(Client),
 
-    Metric = <<"temperatures_">>,
+    Metric = <<"temperatures_batch">>,
     MetricAndPoints =
         lists:map(fun(N) ->
                      Points = points(N),
@@ -596,17 +657,17 @@ t_async_write_batch(_) ->
     greptimedb:stop_client(Client),
     ok.
 
-t_insert_greptime_cloud(_) ->
+t_write_greptime_cloud(_) ->
     Host = os:getenv("GT_TEST_HOST"),
     DbName = os:getenv("GT_TEST_DB"),
     UserName = os:getenv("GT_TEST_USER"),
     PassWd = os:getenv("GT_TEST_PASSWD"),
 
     if (Host == false) or (DbName == false) or (UserName == false) or (PassWd == false) ->
-           ct:print("Ignored t_insert_greptime_cloud..."),
+           ct:print("Ignored t_write_greptime_cloud..."),
            ok;
        true ->
-           ct:print("Running t_insert_greptime_cloud..."),
+           ct:print("Running t_write_greptime_cloud..."),
            %% the endpoint scheme must be `https`.
            Options =
                [{endpoints, [{https, Host, 5001}]},
@@ -643,7 +704,7 @@ t_insert_greptime_cloud(_) ->
 t_insert_requests_empty_points(_) ->
     Client = #{cli_opts => [{timeunit, ms}]},
     Request = greptimedb_encoder:insert_requests(Client, []),
-    #{header := #{dbname := unknown}, request := {inserts, #{inserts := []}}} = Request.
+    #{header := #{dbname := unknown}, request := {row_inserts, #{inserts := []}}} = Request.
 
 t_insert_requests_single_point(_) ->
     Point =
@@ -655,19 +716,17 @@ t_insert_requests_single_point(_) ->
 
     #{header := #{dbname := "greptime-public"},
       request :=
-          {inserts,
-           #{inserts :=
-                 [#{table_name := "sensors",
-                    columns := Columns,
-                    row_count := 1}]}}} =
+          {row_inserts,
+           #{inserts := [#{table_name := "sensors", rows := #{schema := Schema, rows := Rows}}]}}} =
         Request,
 
-    ?assertEqual(3, length(Columns)), % temp, sensor, timestamp
+    ?assertEqual(3, length(Schema)), % temp, sensor, timestamp
+    ?assertEqual(1, length(Rows)),
 
-    {value, TempColumn} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"temp">> end, Columns),
-    ?assertEqual([25.5], maps:get(f64_values, maps:get(values, TempColumn))),
-    ?assertNot(maps:is_key(null_mask, TempColumn)).
+    ColumnNames = [maps:get(column_name, S) || S <- Schema],
+    ?assert(lists:member(<<"greptime_timestamp">>, ColumnNames)),
+    ?assert(lists:member(<<"temp">>, ColumnNames)),
+    ?assert(lists:member(<<"sensor">>, ColumnNames)).
 
 t_insert_requests_all_sparse(_) ->
     Points =
@@ -687,27 +746,82 @@ t_insert_requests_all_sparse(_) ->
     Client = #{cli_opts => [{timeunit, s}]},
     Request = greptimedb_encoder:insert_requests(Client, [{"sparse_test", Points}]),
 
-    #{request := {inserts, #{inserts := [#{columns := Columns, row_count := 3}]}}} = Request,
+    #{request :=
+          {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} =
+        Request,
 
-    ?assertEqual(7, length(Columns)), % 3 fields + 3 tags + timestamp
+    ?assertEqual(7, length(Schema)), % 3 fields + 3 tags + timestamp
+    ?assertEqual(3, length(Rows)),
 
-    % Check field1: only present in row 1
-    {value, Field1} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"field1">> end, Columns),
-    ?assertEqual([1.0], maps:get(f64_values, maps:get(values, Field1))),
-    ?assertEqual(<<0:5, 1:1, 1:1, 0:1>>, maps:get(null_mask, Field1)),
+    ColumnNames = [maps:get(column_name, S) || S <- Schema],
+    ?assert(lists:member(<<"field1">>, ColumnNames)),
+    ?assert(lists:member(<<"field2">>, ColumnNames)),
+    ?assert(lists:member(<<"field3">>, ColumnNames)),
+    ?assert(lists:member(<<"tag1">>, ColumnNames)),
+    ?assert(lists:member(<<"tag2">>, ColumnNames)),
+    ?assert(lists:member(<<"tag3">>, ColumnNames)),
+    ?assert(lists:member(<<"greptime_timestamp">>, ColumnNames)),
 
-    % Check field2: only present in row 2
-    {value, Field2} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"field2">> end, Columns),
-    ?assertEqual([2.0], maps:get(f64_values, maps:get(values, Field2))),
-    ?assertEqual(<<0:5, 1:1, 0:1, 1:1>>, maps:get(null_mask, Field2)),
+    GetColumnIndex =
+        fun(ColName) ->
+           Zipped =
+               lists:zip(
+                   lists:seq(1, length(ColumnNames)), ColumnNames),
+           case lists:keyfind(ColName, 2, Zipped) of
+               {Index, _Name} ->
+                   Index;
+               false ->
+                   not_found
+           end
+        end,
 
-    % Check field3: only present in row 3
-    {value, Field3} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"field3">> end, Columns),
-    ?assertEqual([3.0], maps:get(f64_values, maps:get(values, Field3))),
-    ?assertEqual(<<0:5, 0:1, 1:1, 1:1>>, maps:get(null_mask, Field3)).
+    % Get column indices
+    TsIdx = GetColumnIndex(<<"greptime_timestamp">>),
+    Field1Idx = GetColumnIndex(<<"field1">>),
+    Field2Idx = GetColumnIndex(<<"field2">>),
+    Field3Idx = GetColumnIndex(<<"field3">>),
+    Tag1Idx = GetColumnIndex(<<"tag1">>),
+    Tag2Idx = GetColumnIndex(<<"tag2">>),
+    Tag3Idx = GetColumnIndex(<<"tag3">>),
+
+    [Row1, Row2, Row3] = Rows,
+    #{values := Values1} = Row1,
+    #{values := Values2} = Row2,
+    #{values := Values3} = Row3,
+
+    ?assertEqual(7, length(Values1)),
+    ?assertEqual(7, length(Values2)),
+    ?assertEqual(7, length(Values3)),
+
+    % Verify row 1 content (only field1 and tag1 should have values)
+    ?assertEqual(#{value_data => {timestamp_second_value, 1000000000}},
+                 lists:nth(TsIdx, Values1)),
+    ?assertEqual(#{value_data => {f64_value, 1.0}}, lists:nth(Field1Idx, Values1)),
+    ?assertEqual(#{}, lists:nth(Field2Idx, Values1)),  % sparse: not present
+    ?assertEqual(#{}, lists:nth(Field3Idx, Values1)),  % sparse: not present
+    ?assertEqual(#{value_data => {string_value, <<"value1">>}}, lists:nth(Tag1Idx, Values1)),
+    ?assertEqual(#{}, lists:nth(Tag2Idx, Values1)),    % sparse: not present
+    ?assertEqual(#{}, lists:nth(Tag3Idx, Values1)),    % sparse: not present
+
+    % Verify row 2 content (only field2 and tag2 should have values)
+    ?assertEqual(#{value_data => {timestamp_second_value, 1000000001}},
+                 lists:nth(TsIdx, Values2)),
+    ?assertEqual(#{}, lists:nth(Field1Idx, Values2)),  % sparse: not present
+    ?assertEqual(#{value_data => {f64_value, 2.0}}, lists:nth(Field2Idx, Values2)),
+    ?assertEqual(#{}, lists:nth(Field3Idx, Values2)),  % sparse: not present
+    ?assertEqual(#{}, lists:nth(Tag1Idx, Values2)),    % sparse: not present
+    ?assertEqual(#{value_data => {string_value, <<"value2">>}}, lists:nth(Tag2Idx, Values2)),
+    ?assertEqual(#{}, lists:nth(Tag3Idx, Values2)),    % sparse: not present
+
+    % Verify row 3 content (only field3 and tag3 should have values)
+    ?assertEqual(#{value_data => {timestamp_second_value, 1000000002}},
+                 lists:nth(TsIdx, Values3)),
+    ?assertEqual(#{}, lists:nth(Field1Idx, Values3)),  % sparse: not present
+    ?assertEqual(#{}, lists:nth(Field2Idx, Values3)),  % sparse: not present
+    ?assertEqual(#{value_data => {f64_value, 3.0}}, lists:nth(Field3Idx, Values3)),
+    ?assertEqual(#{}, lists:nth(Tag1Idx, Values3)),    % sparse: not present
+    ?assertEqual(#{}, lists:nth(Tag2Idx, Values3)),    % sparse: not present
+    ?assertEqual(#{value_data => {string_value, <<"value3">>}}, lists:nth(Tag3Idx, Values3)).
 
 t_insert_requests_all_data_types(_) ->
     Point =
@@ -728,86 +842,65 @@ t_insert_requests_all_data_types(_) ->
     Client = #{cli_opts => [{timeunit, ms}]},
     Request = greptimedb_encoder:insert_requests(Client, [{"types_test", [Point]}]),
 
-    #{request := {inserts, #{inserts := [#{columns := Columns}]}}} = Request,
+    #{request :=
+          {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} =
+        Request,
+    ?assertEqual(1, length(Rows)),
 
-    % Verify int32 field
-    {value, Int32Col} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"int32_field">> end, Columns),
-    ?assertEqual('INT32', maps:get(datatype, Int32Col)),
-    ?assertEqual([42], maps:get(i32_values, maps:get(values, Int32Col))),
+    % Verify schema datatypes
+    {value, Int32Schema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"int32_field">> end, Schema),
+    ?assertEqual('INT32', maps:get(datatype, Int32Schema)),
 
-    % Verify int64 field
-    {value, Int64Col} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"int64_field">> end, Columns),
-    ?assertEqual('INT64', maps:get(datatype, Int64Col)),
-    ?assertEqual([9223372036854775807], maps:get(i64_values, maps:get(values, Int64Col))),
+    {value, Int64Schema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"int64_field">> end, Schema),
+    ?assertEqual('INT64', maps:get(datatype, Int64Schema)),
 
-    % Verify uint32 field
-    {value, UInt32Col} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"uint32_field">> end, Columns),
-    ?assertEqual('UINT32', maps:get(datatype, UInt32Col)),
-    ?assertEqual([4294967295], maps:get(u32_values, maps:get(values, UInt32Col))),
+    {value, UInt32Schema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"uint32_field">> end, Schema),
+    ?assertEqual('UINT32', maps:get(datatype, UInt32Schema)),
 
-    % Verify boolean field
-    {value, BoolCol} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"bool_field">> end, Columns),
-    ?assertEqual('BOOLEAN', maps:get(datatype, BoolCol)),
-    ?assertEqual([true], maps:get(bool_values, maps:get(values, BoolCol))),
+    {value, BoolSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"bool_field">> end, Schema),
+    ?assertEqual('BOOLEAN', maps:get(datatype, BoolSchema)),
 
-    % Verify binary field
-    {value, BinaryCol} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"binary_field">> end, Columns),
-    ?assertEqual('BINARY', maps:get(datatype, BinaryCol)),
-    ?assertEqual([<<1, 2, 3>>], maps:get(binary_values, maps:get(values, BinaryCol))),
+    {value, BinarySchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"binary_field">> end, Schema),
+    ?assertEqual('BINARY', maps:get(datatype, BinarySchema)),
 
-    % Verify default field type (should be float64)
-    {value, DefaultFieldCol} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"default_field">> end, Columns),
-    ?assertEqual('FLOAT64', maps:get(datatype, DefaultFieldCol)),
-    ?assertEqual([123.45], maps:get(f64_values, maps:get(values, DefaultFieldCol))),
+    {value, DefaultFieldSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"default_field">> end, Schema),
+    ?assertEqual('FLOAT64', maps:get(datatype, DefaultFieldSchema)),
 
-    % Verify string tag
-    {value, StringTagCol} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"string_tag">> end, Columns),
-    ?assertEqual('STRING', maps:get(datatype, StringTagCol)),
-    ?assertEqual(["test_string"], maps:get(string_values, maps:get(values, StringTagCol))),
+    {value, StringTagSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"string_tag">> end, Schema),
+    ?assertEqual('STRING', maps:get(datatype, StringTagSchema)),
 
-    % Verify default tag type (should be string)
-    {value, DefaultTagCol} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"default_tag">> end, Columns),
-    ?assertEqual('STRING', maps:get(datatype, DefaultTagCol)),
-    ?assertEqual(["default_string"],
-                 maps:get(string_values, maps:get(values, DefaultTagCol))),
+    {value, DefaultTagSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"default_tag">> end, Schema),
+    ?assertEqual('STRING', maps:get(datatype, DefaultTagSchema)),
 
-    % Verify timestamp with nanosecond precision
-    {value, TsCol} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end, Columns),
-    ?assertEqual('TIMESTAMP_NANOSECOND', maps:get(datatype, TsCol)),
-    ?assertEqual([1619775142098000000],
-                 maps:get(timestamp_nanosecond_values, maps:get(values, TsCol))).
+    {value, TsSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"greptime_timestamp">> end, Schema),
+    ?assertEqual('TIMESTAMP_NANOSECOND', maps:get(datatype, TsSchema)),
+
+    [Row] = Rows,
+    #{values := Values} = Row,
+    ?assertEqual(11, length(Values)).
 
 t_insert_requests_all_time_units(_) ->
     BaseTimestamp = 1619775142,
     TestCases =
-        [{ns, BaseTimestamp * 1000000000, timestamp_nanosecond_values, 'TIMESTAMP_NANOSECOND'},
-         {nanosecond,
-          BaseTimestamp * 1000000000,
-          timestamp_nanosecond_values,
-          'TIMESTAMP_NANOSECOND'},
-         {us, BaseTimestamp * 1000000, timestamp_microsecond_values, 'TIMESTAMP_MICROSECOND'},
-         {microsecond,
-          BaseTimestamp * 1000000,
-          timestamp_microsecond_values,
-          'TIMESTAMP_MICROSECOND'},
-         {ms, BaseTimestamp * 1000, timestamp_millisecond_values, 'TIMESTAMP_MILLISECOND'},
-         {millisecond,
-          BaseTimestamp * 1000,
-          timestamp_millisecond_values,
-          'TIMESTAMP_MILLISECOND'},
-         {s, BaseTimestamp, timestamp_second_values, 'TIMESTAMP_SECOND'},
-         {second, BaseTimestamp, timestamp_second_values, 'TIMESTAMP_SECOND'}],
+        [{ns, BaseTimestamp * 1000000000, 'TIMESTAMP_NANOSECOND'},
+         {nanosecond, BaseTimestamp * 1000000000, 'TIMESTAMP_NANOSECOND'},
+         {us, BaseTimestamp * 1000000, 'TIMESTAMP_MICROSECOND'},
+         {microsecond, BaseTimestamp * 1000000, 'TIMESTAMP_MICROSECOND'},
+         {ms, BaseTimestamp * 1000, 'TIMESTAMP_MILLISECOND'},
+         {millisecond, BaseTimestamp * 1000, 'TIMESTAMP_MILLISECOND'},
+         {s, BaseTimestamp, 'TIMESTAMP_SECOND'},
+         {second, BaseTimestamp, 'TIMESTAMP_SECOND'}],
 
-    lists:foreach(fun({TimeUnit, Timestamp, ValuesKey, DataType}) ->
+    lists:foreach(fun({TimeUnit, Timestamp, DataType}) ->
                      Point =
                          #{fields => #{<<"temp">> => 25.0},
                            tags => #{<<"sensor">> => <<"test">>},
@@ -816,15 +909,18 @@ t_insert_requests_all_time_units(_) ->
                      Client = #{cli_opts => [{timeunit, TimeUnit}]},
                      Request = greptimedb_encoder:insert_requests(Client, [{"time_test", [Point]}]),
 
-                     #{request := {inserts, #{inserts := [#{columns := Columns}]}}} = Request,
+                     #{request :=
+                           {row_inserts,
+                            #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} =
+                         Request,
+                     ?assertEqual(1, length(Rows)),
 
-                     {value, TsCol} =
-                         lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">>
+                     {value, TsSchema} =
+                         lists:search(fun(S) -> maps:get(column_name, S) == <<"greptime_timestamp">>
                                       end,
-                                      Columns),
+                                      Schema),
 
-                     ?assertEqual(DataType, maps:get(datatype, TsCol)),
-                     ?assertEqual([Timestamp], maps:get(ValuesKey, maps:get(values, TsCol)))
+                     ?assertEqual(DataType, maps:get(datatype, TsSchema))
                   end,
                   TestCases).
 
@@ -838,22 +934,23 @@ t_insert_requests_metric_formats(_) ->
     Client1 = #{cli_opts => [{dbname, "custom_db"}, {timeunit, ms}]},
     Request1 = greptimedb_encoder:insert_requests(Client1, [{"string_table", [Point]}]),
     #{header := #{dbname := "custom_db"},
-      request := {inserts, #{inserts := [#{table_name := "string_table"}]}}} =
+      request := {row_inserts, #{inserts := [#{table_name := "string_table"}]}}} =
         Request1,
 
     % Test 2: Binary table name
     Request2 = greptimedb_encoder:insert_requests(Client1, [{<<"binary_table">>, [Point]}]),
-    #{request := {inserts, #{inserts := [#{table_name := <<"binary_table">>}]}}} = Request2,
+    #{request := {row_inserts, #{inserts := [#{table_name := <<"binary_table">>}]}}} =
+        Request2,
 
     % Test 3: Atom table name
     Request3 = greptimedb_encoder:insert_requests(Client1, [{atom_table, [Point]}]),
-    #{request := {inserts, #{inserts := [#{table_name := atom_table}]}}} = Request3,
+    #{request := {row_inserts, #{inserts := [#{table_name := atom_table}]}}} = Request3,
 
     % Test 4: {DbName, Table} tuple format
     Request4 =
         greptimedb_encoder:insert_requests(Client1, [{{"tuple_db", "tuple_table"}, [Point]}]),
     #{header := #{dbname := "tuple_db"},
-      request := {inserts, #{inserts := [#{table_name := "tuple_table"}]}}} =
+      request := {row_inserts, #{inserts := [#{table_name := "tuple_table"}]}}} =
         Request4,
 
     % Test 5: Map format with table override
@@ -864,13 +961,15 @@ t_insert_requests_metric_formats(_) ->
     Request5 = greptimedb_encoder:insert_requests(Client1, [{MetricMap, [Point]}]),
     #{header := #{dbname := "map_db"}} = Request5,
     #{request :=
-          {inserts, #{inserts := [#{table_name := "map_table", columns := Columns}]}}} =
+          {row_inserts,
+           #{inserts :=
+                 [#{table_name := "map_table", rows := #{schema := Schema, rows := _Rows}}]}}} =
         Request5,
 
     % Verify timeunit override (should be seconds, not ms from client)
-    {value, TsCol} =
-        lists:search(fun(C) -> maps:get(column_name, C) == <<"greptime_timestamp">> end, Columns),
-    ?assertEqual('TIMESTAMP_SECOND', maps:get(datatype, TsCol)).
+    {value, TsSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"greptime_timestamp">> end, Schema),
+    ?assertEqual('TIMESTAMP_SECOND', maps:get(datatype, TsSchema)).
 
 %% Helper function to execute SQL query and return pretty-printed JSON
 execute_sql_query(Sql) ->
@@ -910,7 +1009,6 @@ t_write_sparse_and_non_sparse(_) ->
     drop_table(Metric),
 
     %% Create mixed sparse and non-sparse points
-    %% Testing similar to t_write but with more systematic sparse patterns
     Points =
         [%% Point 1: Complete data with all common fields
          #{fields => #{<<"temperature">> => 25.5, <<"humidity">> => 60.0},
@@ -962,23 +1060,18 @@ t_write_sparse_and_non_sparse(_) ->
     {ok, #{response := {affected_rows, #{value := 5}}}} =
         greptimedb:write(Client, Metric, Points),
 
-    %% Query back the data to verify correctness
     QueryResult =
         execute_sql_query("SELECT * FROM t_write_sparse_and_non_sparse ORDER BY greptime_timestamp ASC",
                           <<"output">>),
 
-    %% Parse the JSON response to verify the data
     JsonTerm = jsx:decode(QueryResult, [return_maps]),
     [#{<<"records">> := #{<<"rows">> := Rows, <<"schema">> := Schema}}] = JsonTerm,
 
-    %% Verify we have 5 rows
     ?assertEqual(5, length(Rows)),
 
-    %% Extract column names from schema for easier verification
     #{<<"column_schemas">> := ColumnSchemas} = Schema,
     ColumnNames = [maps:get(<<"name">>, Col) || Col <- ColumnSchemas],
 
-    %% Create a helper function to get column index
     GetColIndex =
         fun(ColName) ->
            Zipped =
@@ -992,7 +1085,6 @@ t_write_sparse_and_non_sparse(_) ->
            end
         end,
 
-    %% Verify column presence - should have all fields and tags that were used
     ExpectedColumns =
         [<<"greptime_timestamp">>,
          <<"temperature">>,
@@ -1006,10 +1098,8 @@ t_write_sparse_and_non_sparse(_) ->
     lists:foreach(fun(ExpectedCol) -> ?assert(lists:member(ExpectedCol, ColumnNames)) end,
                   ExpectedColumns),
 
-    %% Verify row data - check specific values and nulls
     [Row1, Row2, Row3, Row4, Row5] = Rows,
 
-    %% Helper to get value from row by column name
     GetValue =
         fun(Row, ColName) ->
            case GetColIndex(ColName) of
@@ -1069,6 +1159,67 @@ t_write_sparse_and_non_sparse(_) ->
     ?assertEqual(<<"room_e">>, GetValue(Row5, <<"location">>)),
     ?assertEqual(<<"annex">>, GetValue(Row5, <<"building">>)),
     ?assertEqual(<<"maintenance">>, GetValue(Row5, <<"status">>)), % Present
+
+    greptimedb:stop_client(Client),
+    ok.
+
+t_write_custom_ts_column(_) ->
+    %% Test writing with custom timestamp column name
+    Metric = <<"custom_ts_test">>,
+    drop_table(Metric),
+
+    %% Define custom timestamp column name
+    CustomTsColumn = <<"event_time">>,
+
+    Points =
+        [#{fields => #{<<"temperature">> => 25.5, <<"humidity">> => 60.0},
+           tags => #{<<"sensor_id">> => <<"sensor_001">>, <<"location">> => <<"room_a">>},
+           timestamp => 1619775142000},
+         #{fields => #{<<"temperature">> => 26.0, <<"humidity">> => 65.0},
+           tags => #{<<"sensor_id">> => <<"sensor_002">>, <<"location">> => <<"room_b">>},
+           timestamp => 1619775143000}],
+
+    %% Create client with custom ts_column option
+    Host = greptime_host(),
+    Options =
+        [{endpoints, [{http, Host, 4001}]},
+         {pool, greptimedb_client_pool_custom_ts},
+         {pool_size, 3},
+         {pool_type, random},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}},
+         {ts_column, CustomTsColumn}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+
+    %% Write with custom timestamp column
+    {ok, #{response := {affected_rows, #{value := 2}}}} =
+        greptimedb:write(Client, Metric, Points),
+
+    QueryResult =
+        execute_sql_query(io_lib:format("SELECT event_time, sensor_id, location, temperature, humidity FROM ~s ORDER BY event_time ASC",
+                                        [Metric]),
+                          <<"output">>),
+
+    JsonTerm = jsx:decode(QueryResult, [return_maps]),
+    [#{<<"records">> := #{<<"rows">> := Rows}}] = JsonTerm,
+
+    ?assertEqual(2, length(Rows)),
+    [Row1, Row2] = Rows,
+
+    [Ts1, SensorId1, Location1, Temp1, Humidity1] = Row1,
+    ?assertEqual(1619775142000, Ts1),
+    ?assertEqual(<<"sensor_001">>, SensorId1),
+    ?assertEqual(<<"room_a">>, Location1),
+    ?assertEqual(25.5, Temp1),
+    ?assertEqual(60.0, Humidity1),
+
+    [Ts2, SensorId2, Location2, Temp2, Humidity2] = Row2,
+    ?assertEqual(1619775143000, Ts2),
+    ?assertEqual(<<"sensor_002">>, SensorId2),
+    ?assertEqual(<<"room_b">>, Location2),
+    ?assertEqual(26.0, Temp2),
+    ?assertEqual(65.0, Humidity2),
 
     greptimedb:stop_client(Client),
     ok.

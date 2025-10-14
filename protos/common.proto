@@ -16,9 +16,34 @@ syntax = "proto3";
 
 package greptime.v1;
 
-option java_package = "io.greptime.v1";
-option java_outer_classname = "Common";
 option go_package = "github.com/GreptimeTeam/greptime-proto/go/greptime/v1";
+option java_outer_classname = "Common";
+option java_package = "io.greptime.v1";
+
+message QueryContext {
+  string current_catalog = 1;
+  string current_schema = 2;
+  string timezone = 4;
+  map<string, string> extensions = 5;
+  uint32 channel = 6;
+  SnapshotSequences snapshot_seqs = 7;
+  // Explain options for the query.
+  ExplainOptions explain = 8;
+}
+
+message SnapshotSequences {
+  // Mappings of the RegionId to the minimal sequence of SST file to scan.
+  map<uint64, uint64> sst_min_sequences = 1;
+  // mapping of RegionId to SequenceNumber, for snapshot read, meaning that the
+  // read should only container data that was committed before (and include) the
+  // given sequence number
+  map<uint64, uint64> snapshot_seqs = 7;
+}
+
+message ExplainOptions {
+  // Whether to enable verbose explain output.
+  bool verbose = 1;
+}
 
 message RequestHeader {
   // The `catalog` that is selected to be used in this request.
@@ -32,9 +57,13 @@ message RequestHeader {
   // Encoded trace_id & span_id, follow the w3c Trace Context
   // https://www.w3.org/TR/trace-context/#header-name
   map<string, string> tracing_context = 5;
+  // The `timezone` for the request
+  string timezone = 6;
 }
 
-message ResponseHeader { Status status = 1; }
+message ResponseHeader {
+  Status status = 1;
+}
 
 message Status {
   // Corresponding to the `StatusCode` definition of GreptimeDB
@@ -54,11 +83,37 @@ message Basic {
   string password = 2;
 }
 
-message Token { string token = 1; }
+message Token {
+  string token = 1;
+}
 
-message AffectedRows { uint32 value = 1; }
+message TableName {
+  string catalog_name = 1;
+  string schema_name = 2;
+  string table_name = 3;
+}
 
-message FlightMetadata { AffectedRows affected_rows = 1; }
+message AffectedRows {
+  uint32 value = 1;
+}
+
+message Metrics {
+  bytes metrics = 1;
+}
+
+message ExpireAfter {
+  int64 value = 1;
+}
+
+// Eval Interval in seconds
+message EvalInterval {
+  int64 seconds = 1;
+}
+
+message FlightMetadata {
+  AffectedRows affected_rows = 1;
+  Metrics metrics = 2;
+}
 
 enum SemanticType {
   TAG = 0;
@@ -93,11 +148,11 @@ enum ColumnDataType {
   INTERVAL_YEAR_MONTH = 23;
   INTERVAL_DAY_TIME = 24;
   INTERVAL_MONTH_DAY_NANO = 25;
-  DURATION_SECOND = 26;
-  DURATION_MILLISECOND = 27;
-  DURATION_MICROSECOND = 28;
-  DURATION_NANOSECOND = 29;
   DECIMAL128 = 30;
+  JSON = 31;
+  VECTOR = 32;
+  LIST = 40;
+  STRUCT = 41;
 }
 
 message IntervalMonthDayNano {
@@ -106,20 +161,98 @@ message IntervalMonthDayNano {
   int64 nanoseconds = 3;
 }
 
+/// Time Unit for timestamp
+enum TimeUnit {
+  // The default time unit is MILLISECOND
+  MILLISECOND = 0;
+  SECOND = 1;
+  MICROSECOND = 2;
+  NANOSECOND = 3;
+}
+
+message TimeRange {
+  int64 start = 1;
+  int64 end = 2;
+}
+
+/// Truncate partially by time ranges
+message TimeRanges {
+  TimeUnit time_unit = 1;
+  repeated TimeRange time_ranges = 2;
+}
+
 // (hi: high 64 bits, lo: low 64 bits) are used to keep the decimal128 value.
 message Decimal128 {
   int64 hi = 1;
   int64 lo = 2;
 }
 
+message StructField {
+  string name = 1;
+  ColumnDataType datatype = 2;
+  ColumnDataTypeExtension datatype_extension = 3;
+}
+
 // Type extension for some complex types
 message ColumnDataTypeExtension {
   oneof type_ext {
     DecimalTypeExtension decimal_type = 1;
+    // Marks the binary column in proto is actually a JSON column.
+    JsonTypeExtension json_type = 2;
+    VectorTypeExtension vector_type = 3;
+    ListTypeExtension list_type = 4;
+    StructTypeExtension struct_type = 5;
   }
 }
 
 message DecimalTypeExtension {
   int32 precision = 1;
   int32 scale = 2;
+}
+
+enum JsonTypeExtension {
+  JSON_BINARY = 0;
+}
+
+message VectorTypeExtension {
+  uint32 dim = 1;
+}
+
+message ListTypeExtension {
+  ColumnDataType datatype = 1;
+  ColumnDataTypeExtension datatype_extension = 2;
+}
+
+message StructTypeExtension {
+  repeated StructField fields = 1;
+}
+
+// Additional options for the column.
+message ColumnOptions {
+  // Supported keys:
+  //   "fulltext":
+  //      A JSON encoded string containing full-text search options for the column.
+  //
+  //      The fulltext options JSON structure:
+  //      {
+  //        "enable": bool,          // Indicates whether full-text search is
+  //                                 // enabled for the column.
+  //
+  //        "analyzer": string,      // The language-specific text analyzer to
+  //                                 // use for indexing and searching text.
+  //                                 // Supported values: ["English" (Default), "Chinese"].
+  //
+  //        "case-sensitive": bool   // Indicates whether the text should be treated
+  //                                 // as case-sensitive during full-text search.
+  //      }
+  //
+  //      Example:
+  //      "fulltext": "{\"enable\": true, \"analyzer\": \"English\", \"case-sensitive\": false}"
+  map<string, string> options = 1;
+}
+
+message ArrowIpc {
+  bytes schema = 1;
+  bytes data_header = 2;
+  bytes payload = 3;
 }
