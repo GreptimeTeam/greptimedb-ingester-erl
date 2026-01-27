@@ -895,7 +895,40 @@ t_insert_requests_all_data_types(_) ->
 
     [Row] = Rows,
     #{values := Values} = Row,
-    ?assertEqual(12, length(Values)).
+    ?assertEqual(12, length(Values)),
+
+    % Verify actual value content, especially for float32_field
+    ColumnNames = [maps:get(column_name, S) || S <- Schema],
+    GetColumnIndex =
+        fun(ColName) ->
+           Zipped =
+               lists:zip(
+                   lists:seq(1, length(ColumnNames)), ColumnNames),
+           case lists:keyfind(ColName, 2, Zipped) of
+               {Index, _Name} ->
+                   Index;
+               false ->
+                   not_found
+           end
+        end,
+
+    % Verify float32_field value (the newly added field)
+    Float32Idx = GetColumnIndex(<<"float32_field">>),
+    Float32Value = lists:nth(Float32Idx, Values),
+    ?assertEqual(#{value_data => {f32_value, 2.71828}}, Float32Value),
+
+    % Verify a few other key fields for robustness
+    Int32Idx = GetColumnIndex(<<"int32_field">>),
+    Int32Value = lists:nth(Int32Idx, Values),
+    ?assertEqual(#{value_data => {i32_value, 42}}, Int32Value),
+
+    Float64Idx = GetColumnIndex(<<"float64_field">>),
+    Float64Value = lists:nth(Float64Idx, Values),
+    ?assertEqual(#{value_data => {f64_value, 3.14159}}, Float64Value),
+
+    BoolIdx = GetColumnIndex(<<"bool_field">>),
+    BoolValue = lists:nth(BoolIdx, Values),
+    ?assertEqual(#{value_data => {bool_value, true}}, BoolValue).
 
 t_insert_requests_all_time_units(_) ->
     BaseTimestamp = 1619775142,
