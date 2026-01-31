@@ -14,7 +14,7 @@
 
 -module(greptimedb_values).
 
--export([int32_value/1, int64_value/1, float64_value/1, boolean_value/1, binary_value/1,
+-export([int32_value/1, int64_value/1, float32_value/1, float64_value/1, boolean_value/1, binary_value/1,
          string_value/1, date_value/1, datetime_value/1, timestamp_second_value/1, uint32_value/1,
          uint64_value/1, timestamp_millisecond_value/1, timestamp_microsecond_value/1,
          timestamp_nanosecond_value/1]).
@@ -30,6 +30,9 @@ uint32_value(V) ->
 
 uint64_value(V) ->
     #{value_data => {u64_value, V}}.
+
+float32_value(V) ->
+    #{value_data => {f32_value, V}}.
 
 float64_value(V) ->
     #{value_data => {f64_value, V}}.

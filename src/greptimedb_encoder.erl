@@ -333,6 +333,8 @@ ts_value_by_datatype(_, Timeunit, Ts) ->
     % Fallback to timeunit-based conversion
     ts_value(Timeunit, Ts).
 
+field_row_value('FLOAT32', V) ->
+    greptimedb_values:float32_value(V);
 field_row_value('FLOAT64', V) ->
     greptimedb_values:float64_value(V);
 field_row_value('INT32', V) ->
@@ -359,6 +361,8 @@ field_row_value(_, V) ->
 
 tag_row_value('STRING', V) ->
     greptimedb_values:string_value(V);
+tag_row_value('FLOAT32', V) ->
+    greptimedb_values:float32_value(V);
 tag_row_value('INT32', V) ->
     greptimedb_values:int32_value(V);
 tag_row_value('INT64', V) ->
