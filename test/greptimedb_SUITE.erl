@@ -476,6 +476,42 @@ t_write_batch(_) ->
     greptimedb:stop_client(Client),
     ok.
 
+t_write_f32(_) ->
+    Metric = <<"table_f32">>,
+    drop_table(Metric),
+    Points =
+        [#{fields => #{<<"field_value">> => greptimedb_values:float32_value(3.0)},
+           tags =>
+               #{<<"tag_value">> => greptimedb_values:float32_value(14.0)},
+           timestamp => 1619775142098}],
+    Host = greptime_host(),
+    Options =
+        [{endpoints, [{http, Host, 4001}]},
+         {pool, greptimedb_client_pool},
+         {pool_size, 5},
+         %% enable append mode and ttl
+         {grpc_hints, #{<<"append_mode">> => <<"true">>, <<"ttl">> => <<"7 days">>}},
+         {pool_type, random},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+    {ok, #{response := {affected_rows, #{value := 1}}}} =
+        greptimedb:write(Client, Metric, Points),
+    SQL = iolist_to_binary(["SELECT * FROM ", Metric]),
+    ?assertMatch(
+       [#{ <<"records">> :=
+               #{ <<"rows">> := [[_, 14.0, 3.0]]
+                , <<"schema">> := #{
+                    <<"column_schemas">> := [_,
+                                             #{<<"data_type">> := <<"Float32">>},
+                                             #{<<"data_type">> := <<"Float32">>}]
+                  }
+                }
+         }],
+       jsx:decode(execute_sql_query(SQL, <<"output">>), [return_maps])),
+    ok.
+
 rand_string(Bytes) ->
     base64:encode(
         crypto:strong_rand_bytes(Bytes)).
