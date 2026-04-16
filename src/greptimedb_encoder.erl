@@ -247,9 +247,24 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
                       case maps:get(Name, IndexMap, undefined) of
                           {Idx, 'FIELD', DT} ->
                               Val = case V of
-                                        V when is_map(V) ->
-                                            V; % Already in row format
-                                        V ->
+                                        #{value_data := {decimal128_value, _}}
+                                          when DT =/= 'DECIMAL128' ->
+                                            %% Typed decimal128 into a column whose schema
+                                            %% was already fixed as a different type by an
+                                            %% earlier point — the server would reject it.
+                                            erlang:error({value_schema_mismatch,
+                                                          #{column => Name,
+                                                            schema_datatype => DT,
+                                                            value_variant => decimal128_value}});
+                                        #{value_data := VD} ->
+                                            #{value_data => VD}; % Already in row format, drop schema hints
+                                        _ when DT =:= 'DECIMAL128' ->
+                                            %% Schema was fixed as DECIMAL128 by an earlier point;
+                                            %% raw values have no precision/scale, so fail fast
+                                            %% rather than silently downgrading to FLOAT64.
+                                            erlang:error({decimal128_requires_typed_value,
+                                                          #{column => Name, value => V}});
+                                        _ ->
                                             field_row_value(DT, V)
                                     end,
                               setelement(Idx, AccT, Val);
@@ -265,9 +280,18 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
                       case maps:get(Name, IndexMap, undefined) of
                           {Idx, 'TAG', DT} ->
                               Val = case V of
-                                        V when is_map(V) ->
-                                            V; % Already in row format
-                                        V ->
+                                        #{value_data := {decimal128_value, _}}
+                                          when DT =/= 'DECIMAL128' ->
+                                            erlang:error({value_schema_mismatch,
+                                                          #{column => Name,
+                                                            schema_datatype => DT,
+                                                            value_variant => decimal128_value}});
+                                        #{value_data := VD} ->
+                                            #{value_data => VD}; % Already in row format, drop schema hints
+                                        _ when DT =:= 'DECIMAL128' ->
+                                            erlang:error({decimal128_requires_typed_value,
+                                                          #{column => Name, value => V}});
+                                        _ ->
                                             tag_row_value(DT, V)
                                     end,
                               setelement(Idx, AccT, Val);
@@ -296,9 +320,10 @@ ts_column_info(Timeunit, TsColumn, _Ts) ->
 
 field_column_info(Name, V) when is_map(V) ->
     DataType = infer_datatype(V),
-    #{column_name => Name,
-      semantic_type => 'FIELD',
-      datatype => DataType};
+    Base = #{column_name => Name,
+             semantic_type => 'FIELD',
+             datatype => DataType},
+    maybe_add_datatype_extension(Base, V);
 field_column_info(Name, _V) ->
     #{column_name => Name,
       semantic_type => 'FIELD',
@@ -306,13 +331,27 @@ field_column_info(Name, _V) ->
 
 tag_column_info(Name, V) when is_map(V) ->
     DataType = infer_datatype(V),
-    #{column_name => Name,
-      semantic_type => 'TAG',
-      datatype => DataType};
+    Base = #{column_name => Name,
+             semantic_type => 'TAG',
+             datatype => DataType},
+    maybe_add_datatype_extension(Base, V);
 tag_column_info(Name, _V) ->
     #{column_name => Name,
       semantic_type => 'TAG',
       datatype => 'STRING'}.
+
+%% @private
+%% @doc Adds `datatype_extension' to a schema entry when the value carries one.
+%% Currently only DECIMAL128 requires an extension (precision/scale).
+maybe_add_datatype_extension(Schema,
+                             #{value_data := {decimal128_value, _},
+                               precision := Precision,
+                               scale := Scale}) ->
+    Schema#{datatype_extension =>
+                #{type_ext =>
+                      {decimal_type, #{precision => Precision, scale => Scale}}}};
+maybe_add_datatype_extension(Schema, _V) ->
+    Schema.
 
 %% Row value functions (for data conversion)
 
@@ -486,6 +525,8 @@ infer_datatype(#{value_data := {Type, _Value}}) ->
             'TIMESTAMP_MILLISECOND';
         timestamp_second_value ->
             'TIMESTAMP_SECOND';
+        decimal128_value ->
+            'DECIMAL128';
         _ ->
             'STRING' % Default
     end.

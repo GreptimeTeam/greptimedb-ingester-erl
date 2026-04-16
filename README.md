@@ -330,11 +330,31 @@ Points = [
 Available type functions in `greptimedb_values`:
 * `int32_value/1`, `int64_value/1`
 * `uint32_value/1`, `uint64_value/1`
-* `float64_value/1`, `boolean_value/1`
+* `float32_value/1`, `float64_value/1`, `boolean_value/1`
 * `binary_value/1`, `string_value/1`
 * `date_value/1`, `datetime_value/1`
 * `timestamp_second_value/1`, `timestamp_millisecond_value/1`
 * `timestamp_microsecond_value/1`, `timestamp_nanosecond_value/1`
+* `decimal128_value/4` — `decimal128_value(Hi, Lo, Precision, Scale)`
+
+`DECIMAL128` is stored as a 128-bit signed integer split into two `int64`
+halves. To reconstruct the logical value, mask each half to an unsigned
+64-bit chunk, combine into a 128-bit pattern, then reinterpret as signed
+two's-complement (Erlang integers are arbitrary-precision, so a raw `bor`
+with a negative `Lo` sign-extends and gives the wrong result):
+
+```erlang
+Mask = (1 bsl 64) - 1,
+Raw  = ((Hi band Mask) bsl 64) bor (Lo band Mask),
+Int128 = if Raw >= (1 bsl 127) -> Raw - (1 bsl 128); true -> Raw end,
+Value = Int128 / math:pow(10, Scale).   %% float result; use a bignum/decimal lib for exact precision
+```
+
+For example, `123.45` with precision 10 and scale 2:
+
+```erlang
+greptimedb_values:decimal128_value(0, 12345, 10, 2).
+```
 
 ## Development
 

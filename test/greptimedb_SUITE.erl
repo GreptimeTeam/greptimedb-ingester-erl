@@ -30,8 +30,14 @@ all() ->
      t_insert_requests_all_data_types,
      t_insert_requests_all_time_units,
      t_insert_requests_metric_formats,
+     t_insert_requests_decimal128,
+     t_insert_requests_decimal128_raw_field_rejected,
+     t_insert_requests_decimal128_raw_tag_rejected,
+     t_insert_requests_decimal128_field_schema_mismatch,
+     t_insert_requests_decimal128_tag_schema_mismatch,
      t_write_sparse_and_non_sparse,
-     t_write_custom_ts_column].
+     t_write_custom_ts_column,
+     t_write_decimal128].
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].
@@ -1001,6 +1007,159 @@ t_insert_requests_all_time_units(_) ->
                      ?assertEqual(DataType, maps:get(datatype, TsSchema))
                   end,
                   TestCases).
+
+t_insert_requests_decimal128(_) ->
+    %% 12345 with scale=2 represents decimal 123.45; hi=0, lo=12345
+    DecimalField = greptimedb_values:decimal128_value(0, 12345, 10, 2),
+    %% Negative value: two's complement representation of -1 in 128-bit is hi=-1, lo=-1
+    NegField = greptimedb_values:decimal128_value(-1, -1, 20, 0),
+    Point =
+        #{fields =>
+              #{<<"price">> => DecimalField,
+                <<"delta">> => NegField},
+          tags => #{<<"market">> => <<"NYSE">>},
+          timestamp => 1619775142098},
+
+    Client = #{cli_opts => [{timeunit, ms}]},
+    Request = greptimedb_encoder:insert_requests(Client, [{"decimals", [Point]}]),
+
+    #{request :=
+          {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := Rows}}]}}} =
+        Request,
+    [#{values := Values}] = Rows,
+
+    %% Schema: DECIMAL128 with precision/scale carried via datatype_extension
+    {value, PriceSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"price">> end, Schema),
+    ?assertEqual('DECIMAL128', maps:get(datatype, PriceSchema)),
+    ?assertEqual(#{type_ext => {decimal_type, #{precision => 10, scale => 2}}},
+                 maps:get(datatype_extension, PriceSchema)),
+
+    {value, DeltaSchema} =
+        lists:search(fun(S) -> maps:get(column_name, S) == <<"delta">> end, Schema),
+    ?assertEqual('DECIMAL128', maps:get(datatype, DeltaSchema)),
+    ?assertEqual(#{type_ext => {decimal_type, #{precision => 20, scale => 0}}},
+                 maps:get(datatype_extension, DeltaSchema)),
+
+    %% Row values: only value_data is kept; precision/scale hints are stripped.
+    ColumnNames = [maps:get(column_name, S) || S <- Schema],
+    Idx = fun(N) ->
+             {I, _} =
+                 lists:keyfind(N,
+                               2,
+                               lists:zip(
+                                   lists:seq(1, length(ColumnNames)), ColumnNames)),
+             I
+          end,
+    ?assertEqual(#{value_data => {decimal128_value, #{hi => 0, lo => 12345}}},
+                 lists:nth(Idx(<<"price">>), Values)),
+    ?assertEqual(#{value_data => {decimal128_value, #{hi => -1, lo => -1}}},
+                 lists:nth(Idx(<<"delta">>), Values)),
+
+    %% Verify the whole request survives full protobuf encoding with verification enabled
+    Encoded =
+        greptimedb_database_pb:encode_msg(Request, greptime_request, [verify]),
+    ?assert(is_binary(Encoded)),
+    ?assert(byte_size(Encoded) > 0).
+
+%% Schema fixed as DECIMAL128 by point 1; point 2 provides a raw field value.
+%% Without the guard the encoder would silently downgrade it to FLOAT64 and
+%% the server would reject the row. The encoder must fail fast instead.
+t_insert_requests_decimal128_raw_field_rejected(_) ->
+    Points =
+        [#{fields => #{<<"price">> => greptimedb_values:decimal128_value(0, 12345, 10, 2)},
+           tags => #{<<"market">> => <<"NYSE">>},
+           timestamp => 1619775142098},
+         #{fields => #{<<"price">> => 123},
+           tags => #{<<"market">> => <<"NYSE">>},
+           timestamp => 1619775142099}],
+    Client = #{cli_opts => [{timeunit, ms}]},
+    ?assertError({decimal128_requires_typed_value, #{column := <<"price">>, value := 123}},
+                 greptimedb_encoder:insert_requests(Client, [{"decimals_raw_field", Points}])).
+
+%% Same guard on the tag side.
+t_insert_requests_decimal128_raw_tag_rejected(_) ->
+    Points =
+        [#{fields => #{<<"amount">> => 1.0},
+           tags => #{<<"key">> => greptimedb_values:decimal128_value(0, 1, 5, 0)},
+           timestamp => 1619775142098},
+         #{fields => #{<<"amount">> => 2.0},
+           tags => #{<<"key">> => <<"raw_string">>},
+           timestamp => 1619775142099}],
+    Client = #{cli_opts => [{timeunit, ms}]},
+    ?assertError({decimal128_requires_typed_value,
+                  #{column := <<"key">>, value := <<"raw_string">>}},
+                 greptimedb_encoder:insert_requests(Client, [{"decimals_raw_tag", Points}])).
+
+%% Schema fixed as FLOAT64 by point 1; point 2 supplies a decimal128 typed map.
+%% The typed-map arm would accept any variant without validation, so without
+%% this guard the server receives a decimal128_value in a FLOAT64 column and
+%% rejects the row.
+t_insert_requests_decimal128_field_schema_mismatch(_) ->
+    Points =
+        [#{fields => #{<<"x">> => 1.0},
+           tags => #{<<"market">> => <<"NYSE">>},
+           timestamp => 1619775142098},
+         #{fields => #{<<"x">> => greptimedb_values:decimal128_value(0, 1, 5, 0)},
+           tags => #{<<"market">> => <<"NYSE">>},
+           timestamp => 1619775142099}],
+    Client = #{cli_opts => [{timeunit, ms}]},
+    ?assertError({value_schema_mismatch,
+                  #{column := <<"x">>,
+                    schema_datatype := 'FLOAT64',
+                    value_variant := decimal128_value}},
+                 greptimedb_encoder:insert_requests(Client, [{"mismatch_field", Points}])).
+
+%% Same mirror check on the tag path.
+t_insert_requests_decimal128_tag_schema_mismatch(_) ->
+    Points =
+        [#{fields => #{<<"amount">> => 1.0},
+           tags => #{<<"k">> => <<"raw_string">>},
+           timestamp => 1619775142098},
+         #{fields => #{<<"amount">> => 2.0},
+           tags => #{<<"k">> => greptimedb_values:decimal128_value(0, 1, 5, 0)},
+           timestamp => 1619775142099}],
+    Client = #{cli_opts => [{timeunit, ms}]},
+    ?assertError({value_schema_mismatch,
+                  #{column := <<"k">>,
+                    schema_datatype := 'STRING',
+                    value_variant := decimal128_value}},
+                 greptimedb_encoder:insert_requests(Client, [{"mismatch_tag", Points}])).
+
+t_write_decimal128(_) ->
+    Metric = <<"table_decimal128">>,
+    drop_table(Metric),
+    Points =
+        [#{fields =>
+               #{<<"amount">> => greptimedb_values:decimal128_value(0, 12345, 10, 2)},
+           tags => #{<<"symbol">> => <<"AAPL">>},
+           timestamp => 1619775142098}],
+    Host = greptime_host(),
+    Options =
+        [{endpoints, [{http, Host, 4001}]},
+         {pool, greptimedb_client_pool},
+         {pool_size, 5},
+         {grpc_hints, #{<<"append_mode">> => <<"true">>, <<"ttl">> => <<"7 days">>}},
+         {pool_type, random},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    true = greptimedb:is_alive(Client),
+    {ok, #{response := {affected_rows, #{value := 1}}}} =
+        greptimedb:write(Client, Metric, Points),
+    SQL = iolist_to_binary(["SELECT * FROM ", Metric]),
+    ?assertMatch(
+       [#{ <<"records">> :=
+               #{ <<"rows">> := [[_, <<"AAPL">>, <<"123.45">>]]
+                , <<"schema">> := #{
+                    <<"column_schemas">> := [_, _,
+                                             #{<<"data_type">> := <<"Decimal(10, 2)">>}]
+                  }
+                }
+         }],
+       jsx:decode(execute_sql_query(SQL, <<"output">>), [return_maps])),
+    greptimedb:stop_client(Client),
+    ok.
 
 t_insert_requests_metric_formats(_) ->
     Point =
