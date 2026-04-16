@@ -249,7 +249,13 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
                               Val = case V of
                                         #{value_data := VD} ->
                                             #{value_data => VD}; % Already in row format, drop schema hints
-                                        V ->
+                                        _ when DT =:= 'DECIMAL128' ->
+                                            %% Schema was fixed as DECIMAL128 by an earlier point;
+                                            %% raw values have no precision/scale, so fail fast
+                                            %% rather than silently downgrading to FLOAT64.
+                                            erlang:error({decimal128_requires_typed_value,
+                                                          #{column => Name, value => V}});
+                                        _ ->
                                             field_row_value(DT, V)
                                     end,
                               setelement(Idx, AccT, Val);
@@ -267,7 +273,10 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
                               Val = case V of
                                         #{value_data := VD} ->
                                             #{value_data => VD}; % Already in row format, drop schema hints
-                                        V ->
+                                        _ when DT =:= 'DECIMAL128' ->
+                                            erlang:error({decimal128_requires_typed_value,
+                                                          #{column => Name, value => V}});
+                                        _ ->
                                             tag_row_value(DT, V)
                                     end,
                               setelement(Idx, AccT, Val);

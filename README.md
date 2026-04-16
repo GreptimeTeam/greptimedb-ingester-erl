@@ -337,9 +337,20 @@ Available type functions in `greptimedb_values`:
 * `timestamp_microsecond_value/1`, `timestamp_nanosecond_value/1`
 * `decimal128_value/4` — `decimal128_value(Hi, Lo, Precision, Scale)`
 
-`DECIMAL128` is stored as a 128-bit signed integer split into two int64
-halves. The logical value is `(Hi bsl 64 bor Lo) * 10^(-Scale)`. For example,
-`123.45` with precision 10 and scale 2:
+`DECIMAL128` is stored as a 128-bit signed integer split into two `int64`
+halves. To reconstruct the logical value, mask each half to an unsigned
+64-bit chunk, combine into a 128-bit pattern, then reinterpret as signed
+two's-complement (Erlang integers are arbitrary-precision, so a raw `bor`
+with a negative `Lo` sign-extends and gives the wrong result):
+
+```erlang
+Mask = (1 bsl 64) - 1,
+Raw  = ((Hi band Mask) bsl 64) bor (Lo band Mask),
+Int128 = if Raw >= (1 bsl 127) -> Raw - (1 bsl 128); true -> Raw end,
+%% Logical value = Int128 / 10^Scale (use a bignum/decimal lib for precision)
+```
+
+For example, `123.45` with precision 10 and scale 2:
 
 ```erlang
 greptimedb_values:decimal128_value(0, 12345, 10, 2).

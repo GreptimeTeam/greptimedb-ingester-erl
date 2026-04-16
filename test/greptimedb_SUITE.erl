@@ -31,6 +31,8 @@ all() ->
      t_insert_requests_all_time_units,
      t_insert_requests_metric_formats,
      t_insert_requests_decimal128,
+     t_insert_requests_decimal128_raw_field_rejected,
+     t_insert_requests_decimal128_raw_tag_rejected,
      t_write_sparse_and_non_sparse,
      t_write_custom_ts_column,
      t_write_decimal128].
@@ -1057,6 +1059,35 @@ t_insert_requests_decimal128(_) ->
         greptimedb_database_pb:encode_msg(Request, greptime_request, [verify]),
     ?assert(is_binary(Encoded)),
     ?assert(byte_size(Encoded) > 0).
+
+%% Schema fixed as DECIMAL128 by point 1; point 2 provides a raw field value.
+%% Without the guard the encoder would silently downgrade it to FLOAT64 and
+%% the server would reject the row. The encoder must fail fast instead.
+t_insert_requests_decimal128_raw_field_rejected(_) ->
+    Points =
+        [#{fields => #{<<"price">> => greptimedb_values:decimal128_value(0, 12345, 10, 2)},
+           tags => #{<<"market">> => <<"NYSE">>},
+           timestamp => 1619775142098},
+         #{fields => #{<<"price">> => 123},
+           tags => #{<<"market">> => <<"NYSE">>},
+           timestamp => 1619775142099}],
+    Client = #{cli_opts => [{timeunit, ms}]},
+    ?assertError({decimal128_requires_typed_value, #{column := <<"price">>, value := 123}},
+                 greptimedb_encoder:insert_requests(Client, [{"decimals_raw_field", Points}])).
+
+%% Same guard on the tag side.
+t_insert_requests_decimal128_raw_tag_rejected(_) ->
+    Points =
+        [#{fields => #{<<"amount">> => 1.0},
+           tags => #{<<"key">> => greptimedb_values:decimal128_value(0, 1, 5, 0)},
+           timestamp => 1619775142098},
+         #{fields => #{<<"amount">> => 2.0},
+           tags => #{<<"key">> => <<"raw_string">>},
+           timestamp => 1619775142099}],
+    Client = #{cli_opts => [{timeunit, ms}]},
+    ?assertError({decimal128_requires_typed_value,
+                  #{column := <<"key">>, value := <<"raw_string">>}},
+                 greptimedb_encoder:insert_requests(Client, [{"decimals_raw_tag", Points}])).
 
 t_write_decimal128(_) ->
     Metric = <<"table_decimal128">>,

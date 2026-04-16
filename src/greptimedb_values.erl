@@ -67,11 +67,22 @@ timestamp_nanosecond_value(V) ->
 %% @doc Builds a Decimal128 value with the required precision and scale.
 %%
 %% GreptimeDB stores DECIMAL128 as a 128-bit signed integer split into two
-%% int64 halves (`Hi' upper 64 bits, `Lo' lower 64 bits). The logical value is
-%% `(Hi bsl 64 bor Lo) * 10^(-Scale)'. `Precision' and `Scale' are carried on
-%% the value map so the encoder can populate the column's datatype_extension
-%% in the row-based schema. They are stripped from the protobuf-encoded Value
-%% message (the server reads them from the schema, not the value).
+%% int64 halves (`Hi' upper 64 bits, `Lo' lower 64 bits). To reconstruct the
+%% logical value, mask each half to an unsigned 64-bit chunk, combine into a
+%% 128-bit pattern, then reinterpret as signed two's-complement — Erlang
+%% integers are arbitrary-precision, so a raw `bor' with a negative `Lo'
+%% sign-extends and yields the wrong value. Equivalent Erlang:
+%% ```
+%%   Mask   = (1 bsl 64) - 1,
+%%   Raw    = ((Hi band Mask) bsl 64) bor (Lo band Mask),
+%%   Int128 = if Raw >= (1 bsl 127) -> Raw - (1 bsl 128); true -> Raw end,
+%%   Value  = Int128 / 10^Scale.   %% use a bignum/decimal lib for precision
+%% '''
+%%
+%% `Precision' and `Scale' are carried on the value map so the encoder can
+%% populate the column's datatype_extension in the row-based schema. They are
+%% stripped from the protobuf-encoded Value message (the server reads them
+%% from the schema, not the value).
 decimal128_value(Hi, Lo, Precision, Scale)
   when is_integer(Hi), is_integer(Lo),
        is_integer(Precision), Precision > 0, Precision =< 38,
