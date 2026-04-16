@@ -76,7 +76,7 @@ timestamp_nanosecond_value(V) ->
 %%   Mask   = (1 bsl 64) - 1,
 %%   Raw    = ((Hi band Mask) bsl 64) bor (Lo band Mask),
 %%   Int128 = if Raw >= (1 bsl 127) -> Raw - (1 bsl 128); true -> Raw end,
-%%   Value  = Int128 / 10^Scale.   %% use a bignum/decimal lib for precision
+%%   Value  = Int128 / math:pow(10, Scale).   %% float result; use a bignum/decimal lib for exact precision
 %% '''
 %%
 %% `Precision' and `Scale' are carried on the value map so the encoder can

@@ -247,6 +247,15 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
                       case maps:get(Name, IndexMap, undefined) of
                           {Idx, 'FIELD', DT} ->
                               Val = case V of
+                                        #{value_data := {decimal128_value, _}}
+                                          when DT =/= 'DECIMAL128' ->
+                                            %% Typed decimal128 into a column whose schema
+                                            %% was already fixed as a different type by an
+                                            %% earlier point — the server would reject it.
+                                            erlang:error({value_schema_mismatch,
+                                                          #{column => Name,
+                                                            schema_datatype => DT,
+                                                            value_variant => decimal128_value}});
                                         #{value_data := VD} ->
                                             #{value_data => VD}; % Already in row format, drop schema hints
                                         _ when DT =:= 'DECIMAL128' ->
@@ -271,6 +280,12 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
                       case maps:get(Name, IndexMap, undefined) of
                           {Idx, 'TAG', DT} ->
                               Val = case V of
+                                        #{value_data := {decimal128_value, _}}
+                                          when DT =/= 'DECIMAL128' ->
+                                            erlang:error({value_schema_mismatch,
+                                                          #{column => Name,
+                                                            schema_datatype => DT,
+                                                            value_variant => decimal128_value}});
                                         #{value_data := VD} ->
                                             #{value_data => VD}; % Already in row format, drop schema hints
                                         _ when DT =:= 'DECIMAL128' ->

@@ -33,6 +33,8 @@ all() ->
      t_insert_requests_decimal128,
      t_insert_requests_decimal128_raw_field_rejected,
      t_insert_requests_decimal128_raw_tag_rejected,
+     t_insert_requests_decimal128_field_schema_mismatch,
+     t_insert_requests_decimal128_tag_schema_mismatch,
      t_write_sparse_and_non_sparse,
      t_write_custom_ts_column,
      t_write_decimal128].
@@ -1088,6 +1090,41 @@ t_insert_requests_decimal128_raw_tag_rejected(_) ->
     ?assertError({decimal128_requires_typed_value,
                   #{column := <<"key">>, value := <<"raw_string">>}},
                  greptimedb_encoder:insert_requests(Client, [{"decimals_raw_tag", Points}])).
+
+%% Schema fixed as FLOAT64 by point 1; point 2 supplies a decimal128 typed map.
+%% The typed-map arm would accept any variant without validation, so without
+%% this guard the server receives a decimal128_value in a FLOAT64 column and
+%% rejects the row.
+t_insert_requests_decimal128_field_schema_mismatch(_) ->
+    Points =
+        [#{fields => #{<<"x">> => 1.0},
+           tags => #{<<"market">> => <<"NYSE">>},
+           timestamp => 1619775142098},
+         #{fields => #{<<"x">> => greptimedb_values:decimal128_value(0, 1, 5, 0)},
+           tags => #{<<"market">> => <<"NYSE">>},
+           timestamp => 1619775142099}],
+    Client = #{cli_opts => [{timeunit, ms}]},
+    ?assertError({value_schema_mismatch,
+                  #{column := <<"x">>,
+                    schema_datatype := 'FLOAT64',
+                    value_variant := decimal128_value}},
+                 greptimedb_encoder:insert_requests(Client, [{"mismatch_field", Points}])).
+
+%% Same mirror check on the tag path.
+t_insert_requests_decimal128_tag_schema_mismatch(_) ->
+    Points =
+        [#{fields => #{<<"amount">> => 1.0},
+           tags => #{<<"k">> => <<"raw_string">>},
+           timestamp => 1619775142098},
+         #{fields => #{<<"amount">> => 2.0},
+           tags => #{<<"k">> => greptimedb_values:decimal128_value(0, 1, 5, 0)},
+           timestamp => 1619775142099}],
+    Client = #{cli_opts => [{timeunit, ms}]},
+    ?assertError({value_schema_mismatch,
+                  #{column := <<"k">>,
+                    schema_datatype := 'STRING',
+                    value_variant := decimal128_value}},
+                 greptimedb_encoder:insert_requests(Client, [{"mismatch_tag", Points}])).
 
 t_write_decimal128(_) ->
     Metric = <<"table_decimal128">>,
