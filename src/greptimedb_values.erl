@@ -17,7 +17,7 @@
 -export([int32_value/1, int64_value/1, float32_value/1, float64_value/1, boolean_value/1, binary_value/1,
          string_value/1, date_value/1, datetime_value/1, timestamp_second_value/1, uint32_value/1,
          uint64_value/1, timestamp_millisecond_value/1, timestamp_microsecond_value/1,
-         timestamp_nanosecond_value/1]).
+         timestamp_nanosecond_value/1, decimal128_value/4]).
 
 int32_value(V) ->
     #{value_data => {i32_value, V}}.
@@ -63,3 +63,19 @@ timestamp_microsecond_value(V) ->
 
 timestamp_nanosecond_value(V) ->
     #{value_data => {timestamp_nanosecond_value, V}}.
+
+%% @doc Builds a Decimal128 value with the required precision and scale.
+%%
+%% GreptimeDB stores DECIMAL128 as a 128-bit signed integer split into two
+%% int64 halves (`Hi' upper 64 bits, `Lo' lower 64 bits). The logical value is
+%% `(Hi bsl 64 bor Lo) * 10^(-Scale)'. `Precision' and `Scale' are carried on
+%% the value map so the encoder can populate the column's datatype_extension
+%% in the row-based schema. They are stripped from the protobuf-encoded Value
+%% message (the server reads them from the schema, not the value).
+decimal128_value(Hi, Lo, Precision, Scale)
+  when is_integer(Hi), is_integer(Lo),
+       is_integer(Precision), Precision > 0, Precision =< 38,
+       is_integer(Scale), Scale >= 0, Scale =< Precision ->
+    #{value_data => {decimal128_value, #{hi => Hi, lo => Lo}},
+      precision => Precision,
+      scale => Scale}.
