@@ -13,7 +13,8 @@
 -define(WRONG_PASSWORD, <<"wrong_pwd">>).
 
 all() ->
-    [t_write,
+    [t_recover_stale_channel,
+     t_write,
      t_write_stream,
      t_write_failure,
      t_write_batch,
@@ -38,6 +39,29 @@ all() ->
      t_write_sparse_and_non_sparse,
      t_write_custom_ts_column,
      t_write_decimal128].
+
+t_recover_stale_channel(_) ->
+    Pool = greptimedb_stale_channel_pool,
+    Channel = <<"greptimedb_stale_channel_pool:1">>,
+    Endpoint = {http, greptime_host(), 5001},
+    GrpcOptions = #{connect_timeout => 5_000},
+    Options =
+        [{endpoints, [Endpoint]},
+         {pool, Pool},
+         {pool_size, 1},
+         {grpc_opts, GrpcOptions}],
+    try
+        {Scheme, Host, Port} = Endpoint,
+        {ok, StaleChannel} =
+            grpcbox_channel_sup:start_child(
+              Channel, [{Scheme, Host, Port, []}], GrpcOptions),
+        {ok, Client} = greptimedb:start_client(Options),
+        ?assertNot(is_process_alive(StaleChannel)),
+        ok = greptimedb:stop_client(Client)
+    after
+        _ = catch ecpool:stop_sup_pool(Pool),
+        _ = catch grpcbox_channel:stop(Channel)
+    end.
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].

@@ -71,7 +71,7 @@ init(Args) ->
         lists:map(fun({Scheme, Host, Port}) -> {Scheme, Host, Port, ssl_options(Scheme, SslOptions)}
                   end, Endpoints),
     Channel = iolist_to_binary([PoolName, ":", integer_to_binary(WorkerId)]),
-    {ok, _} = grpcbox_channel_sup:start_child(Channel, Channels, Options),
+    {ok, _} = start_channel(Channel, Channels, Options),
     logger:debug("[GreptimeDB] genserver has started (~s)~n", [Channel]),
     {ok, #state{channel = Channel, hints = Hints, requests = #{ pending => queue:new(), pending_count => 0}}}.
 
@@ -132,6 +132,28 @@ terminate(Reason, #state{channel = Channel} = State) ->
 %%%===================================================================
 %%% Helper functions
 %%%===================================================================
+start_channel(Channel, Channels, Options) ->
+    case grpcbox_channel_sup:start_child(Channel, Channels, Options) of
+        {error, {already_started, StaleChannel}} ->
+            %% A worker may terminate before its grpcbox channel is stopped, leaving
+            %% the channel alive under the global supervisor. Remove that orphan
+            %% before reusing the deterministic channel name.
+            logger:warning(
+              "[GreptimeDB] removing stale grpc channel ~s (~p)",
+              [Channel, StaleChannel]),
+            ok = stop_stale_channel(Channel),
+            grpcbox_channel_sup:start_child(Channel, Channels, Options);
+        Result ->
+            Result
+    end.
+
+stop_stale_channel(Channel) ->
+    try grpcbox_channel:stop(Channel)
+    catch
+        exit:noproc -> ok;
+        exit:{noproc, _} -> ok
+    end.
+
 ssl_options(https, []) ->
     %% https://www.erlang.org/doc/man/ssl#type-client_option
     [
