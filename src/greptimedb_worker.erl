@@ -148,7 +148,9 @@ start_channel(Channel, Channels, Options) ->
     end.
 
 stop_stale_channel(Channel) ->
-    try grpcbox_channel:stop(Channel)
+    try
+        _ = grpcbox_channel:stop(Channel),
+        ok
     catch
         exit:noproc -> ok;
         exit:{noproc, _} -> ok
