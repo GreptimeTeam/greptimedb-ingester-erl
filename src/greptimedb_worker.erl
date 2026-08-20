@@ -24,7 +24,7 @@
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, async_handle/3]).
 -export([connect/1]).
 
--record(state, {channel, requests, hints}).
+-record(state, {channel, requests, hints, batch_timer = undefined}).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -104,17 +104,19 @@ handle_call(channel, _From, #state{channel = Channel} = State) ->
 handle_info(?ASYNC_REQ(Request, ExpireAt, ResultCallback), State0) ->
     Req = ?REQ(Request, ExpireAt),
     State1 = enqueue_req(ResultCallback, Req, State0),
-    State = maybe_shoot(State1, false),
-    noreply_state(State);
+    State = update_batch_timer(maybe_shoot(State1, false)),
+    {noreply, State};
 
-handle_info(timeout, State0) ->
-    State = maybe_shoot(State0, true),
-    noreply_state(State);
+handle_info({timeout, TRef, flush_batch}, #state{batch_timer = TRef} = State0) ->
+    State1 = maybe_shoot(State0#state{batch_timer = undefined}, true),
+    {noreply, update_batch_timer(State1)};
+handle_info({timeout, _TRef, flush_batch}, State) ->
+    {noreply, State};
 
 handle_info(Info, State) ->
     logger:debug("~p unexpected_info: ~p, channel: ~p", [?MODULE, Info, State#state.channel]),
 
-    {noreply, State, ?ASYNC_BATCH_LINGER}.
+    {noreply, State}.
 
 
 start_link(Args) ->
@@ -205,11 +207,22 @@ reply({F, A}, Result) when is_function(F) ->
 reply(From, Result) ->
     gen_server:reply(From, Result).
 
-noreply_state(#state{requests = #{pending_count := N}} = State) when N > 0 ->
-    {noreply, State, ?ASYNC_BATCH_LINGER};
+update_batch_timer(#state{requests = #{pending_count := 0}} = State) ->
+    cancel_batch_timer(State);
+update_batch_timer(#state{requests = #{pending_count := N}} = State) when N > 0 ->
+    start_batch_timer(State).
 
-noreply_state(State) ->
-    {noreply, State}.
+start_batch_timer(#state{batch_timer = undefined} = State) ->
+    TRef = erlang:start_timer(?ASYNC_BATCH_LINGER, self(), flush_batch),
+    State#state{batch_timer = TRef};
+start_batch_timer(State) ->
+    State.
+
+cancel_batch_timer(#state{batch_timer = TRef} = State) when is_reference(TRef) ->
+    _ = erlang:cancel_timer(TRef),
+    State#state{batch_timer = undefined};
+cancel_batch_timer(State) ->
+    State.
 
 
 %%%===================================================================
