@@ -9,8 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Configurable timeouts as client options: `connect_timeout` (default `5000`),
-  `request_timeout` (default `10000`) and `health_check_timeout` (default `1000`),
-  all in milliseconds. The defaults match the values that were hardcoded before.
+  `request_timeout` (default `10000`) and `health_check_timeout` (default `10000`),
+  all in milliseconds. `connect_timeout` and `request_timeout` keep the values that
+  were hardcoded before; the health check deadline was 1000 ms and now matches
+  `request_timeout`.
 - `tcp_user_timeout` client option (default `0`, disabled), set as `TCP_USER_TIMEOUT`
   on the connection. The client sends neither TCP keepalive nor HTTP/2 pings, so
   a silently broken connection otherwise stays in the pool and every request on it

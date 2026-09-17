@@ -223,7 +223,7 @@ Available client options:
     * More about [table options](https://docs.greptime.com/reference/sql/create/#table-options)
 * **`connect_timeout`**: Milliseconds to wait for the TCP connection to an endpoint (default `5000`)
 * **`request_timeout`**: gRPC deadline in milliseconds for writes, including streaming writes and the requests buffered by `async_write` (default `10000`)
-* **`health_check_timeout`**: gRPC deadline in milliseconds for `is_alive` (default `1000`)
+* **`health_check_timeout`**: gRPC deadline in milliseconds for `is_alive` (default `10000`)
 * **`tcp_user_timeout`**: Milliseconds unacknowledged data may stay outstanding before the
   kernel drops the connection, set as `TCP_USER_TIMEOUT` on the socket (default `0`, disabled).
   The client sends no TCP keepalive and no HTTP/2 ping, so without this a silently broken
@@ -252,7 +252,7 @@ Options = [
     {ts_column, <<"event_time">>},
     {connect_timeout, 5000},
     {request_timeout, 10000},
-    {health_check_timeout, 1000},
+    {health_check_timeout, 10000},
     {tcp_user_timeout, 30000},
     {grpc_hints, #{
         <<"append_mode">> => <<"true">>,

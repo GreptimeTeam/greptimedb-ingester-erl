@@ -39,7 +39,7 @@
 
 -define(DEFAULT_CONNECT_TIMEOUT, 5_000).
 -define(DEFAULT_REQUEST_TIMEOUT, 10_000).
--define(DEFAULT_HEALTH_CHECK_TIMEOUT, 1_000).
+-define(DEFAULT_HEALTH_CHECK_TIMEOUT, 10_000).
 %% 0 leaves TCP_USER_TIMEOUT untouched, which is the chatterbox default.
 -define(DEFAULT_TCP_USER_TIMEOUT, 0).
 %% How long a caller waits on top of the gRPC deadline. Without this margin the
