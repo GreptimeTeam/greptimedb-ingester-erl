@@ -1,6 +1,6 @@
 -module(greptimedb_stream).
 
--export([write/3, write_batch/2, write_request/2, finish/1]).
+-export([write/3, write_batch/2, write_request/2, finish/1, finish/2]).
 
 %% @doc write the points of the metric to the gRPC stream, returns the result.
 -spec write(Stream, Metric, Points) -> {ok, term()} | {error, term()}
@@ -42,13 +42,20 @@ write_request(Stream, Request) ->
             {error, R}
     end.
 
-%% @doc Finish the gRPC stream and wait the result.
+%% @doc Finish the gRPC stream and wait the result, past the client's
+%% `request_timeout' so the gRPC deadline error surfaces first.
 -spec finish(Stream :: map()) -> {ok, term()} | {error, term(), term()} | timeout | stream_finished.
 finish(Stream) ->
-    finish(Stream, 10_000).
+    #{request_timeout := Timeout} = stream_timeouts(Stream),
+    finish(Stream, greptimedb_worker:caller_timeout(Timeout)).
 
 %% @doc Finish the gRPC stream and wait the result with timeout in milliseconds.
 -spec finish(Stream :: map(), Timeout :: integer()) -> {ok, term()} | {error, term(), term()} | timeout | stream_finished.
+stream_timeouts(#{timeouts := Timeouts}) ->
+    Timeouts;
+stream_timeouts(Stream) ->
+    greptimedb_worker:timeouts(maps:get(cli_opts, Stream, [])).
+
 finish(Stream, Timeout) ->
     try
         ok = grpcbox_client:close_send(Stream),
