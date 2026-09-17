@@ -120,8 +120,8 @@ handle_call(health_check, _From,
         Err ->
             {reply, Err, State}
     end;
-handle_call(channel, _From, #state{channel = Channel} = State) ->
-    {reply, {ok, Channel}, State}.
+handle_call(channel, _From, #state{channel = Channel, hints = Hints} = State) ->
+    {reply, {ok, Channel, Hints}, State}.
 
 handle_info(?ASYNC_REQ(Request, ExpireAt, ResultCallback), State0) ->
     Req = ?REQ(Request, ExpireAt),
@@ -168,7 +168,7 @@ timeouts(Options) ->
       tcp_user_timeout =>
           proplists:get_value(tcp_user_timeout, Options, ?DEFAULT_TCP_USER_TIMEOUT)}.
 
--spec caller_timeout(atom(), timeouts()) -> pos_integer().
+-spec caller_timeout(request_timeout | health_check_timeout, timeouts()) -> pos_integer().
 caller_timeout(Key, Timeouts) ->
     maps:get(Key, Timeouts) + ?CALLER_TIMEOUT_MARGIN.
 
@@ -267,16 +267,8 @@ enqueue_req(ReplyTo, Req, #state{requests = Requests0} = State) ->
 
 
 %% Try to write requests
-maybe_shoot(#state{requests = Requests0, channel = Channel} = State0, Force) ->
-    State = State0#state{requests = drop_expired(Requests0)},
-    %% If the channel is down
-    ClientDown = is_pid(Channel) andalso (not is_process_alive(Channel)),
-    case ClientDown of
-        true ->
-            State;
-        false ->
-            do_shoot(State, Force)
-    end.
+maybe_shoot(#state{requests = Requests0} = State0, Force) ->
+    do_shoot(State0#state{requests = drop_expired(Requests0)}, Force).
 
 
 do_shoot(#state{requests = #{pending := Pending0, pending_count := N} = Requests0, channel = Channel} = State0, _Force) when
@@ -390,8 +382,10 @@ health_check(Pid, Timeouts) ->
 stream(Pid, #{request_timeout := Timeout} = Timeouts) ->
     try
         case gen_server:call(Pid, channel, caller_timeout(request_timeout, Timeouts)) of
-            {ok, Channel} ->
-                Ctx = ctx:with_deadline_after(Timeout, millisecond),
+            {ok, Channel, Hints} ->
+                %% The stream must be created by the calling process: grpcbox
+                %% delivers its messages to whoever opened it.
+                Ctx = new_ctx(Timeout, Hints),
                 greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel});
             Err -> Err
         end

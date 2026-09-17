@@ -16,6 +16,7 @@ all() ->
     [t_recover_stale_channel,
      t_write,
      t_write_stream,
+     t_write_stream_hints,
      t_write_failure,
      t_write_batch,
      t_bench_perf,
@@ -479,6 +480,29 @@ t_write_stream(_) ->
                   lists:seq(1, 10)),
 
     {ok, #{response := {affected_rows, #{value := 55}}}} = greptimedb_stream:finish(Stream),
+    greptimedb:stop_client(Client),
+    ok.
+
+t_write_stream_hints(_) ->
+    Metric = <<"temperatures_stream_hints">>,
+    drop_table(Metric),
+    Options =
+        [{endpoints, [{http, greptime_host(), 4001}]},
+         {pool, greptimedb_stream_hints_pool},
+         {pool_size, 1},
+         {grpc_hints, #{<<"append_mode">> => <<"true">>, <<"ttl">> => <<"7 days">>}},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    {ok, Stream} = greptimedb:write_stream(Client),
+    ok = greptimedb_stream:write(Stream, Metric, points(1)),
+    {ok, #{response := {affected_rows, #{value := 1}}}} = greptimedb_stream:finish(Stream),
+
+    %% The hints travel on the stream's own context, not the one used by write/3
+    ShowCreate = execute_sql_query("show create table temperatures_stream_hints"),
+    ?assert(string:find(ShowCreate, "ttl = '7days'") =/= nomatch),
+    ?assert(string:find(ShowCreate, "append_mode = 'true'") =/= nomatch),
+
     greptimedb:stop_client(Client),
     ok.
 

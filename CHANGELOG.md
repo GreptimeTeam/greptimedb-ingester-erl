@@ -31,6 +31,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   error. The caller and the gRPC deadline were both 1000 ms, so the caller always
   gave up first. Every caller now waits 2000 ms beyond the deadline it set,
   `greptimedb_stream:finish/1` included.
+- `grpc_hints` are now sent on streaming writes. `write_stream/1` built its
+  context without the hint header, so table options such as `ttl` and
+  `append_mode` were silently dropped on tables created through a stream.
 - Recover a stale gRPC channel left behind when a pool worker terminates before
   its channel is stopped (#58).
 
