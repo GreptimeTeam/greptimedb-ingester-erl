@@ -31,7 +31,9 @@
                       health_check_timeout := pos_integer(),
                       tcp_user_timeout := non_neg_integer()}.
 
--record(state, {channel, requests, hints, timeouts}).
+%% No timeout lives here: every request carries the deadline its caller asked
+%% for, which is what keeps a caller's wait and the gRPC deadline in step.
+-record(state, {channel, requests, hints}).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -47,11 +49,11 @@
 -define(GTDB_HINT_HEADER, <<"x-greptime-hints">>).
 -define(ASYNC_BATCH_SIZE, 200).
 -define(ASYNC_BATCH_LINGER, 20).
--define(ASYNC_REQ(Req, ExpireAt, ResultCallback),
-        {async, Req, ExpireAt, ResultCallback}
+-define(ASYNC_REQ(Req, ExpireAt, Timeout, ResultCallback),
+        {async, Req, ExpireAt, Timeout, ResultCallback}
        ).
--define(REQ(Req, ExpireAt),
-        {Req, ExpireAt}
+-define(REQ(Req, ExpireAt, Timeout),
+        {Req, ExpireAt, Timeout}
        ).
 -define(PEND_REQ(ReplyTo, Req), {ReplyTo, Req}).
 
@@ -78,7 +80,7 @@ init(Args) ->
     SslOptions = proplists:get_value(ssl_opts, Args, []),
     Options = proplists:get_value(grpc_opts, Args, #{}),
     #{connect_timeout := ConnectTimeout,
-      tcp_user_timeout := TcpUserTimeout} = Timeouts = timeouts(Args),
+      tcp_user_timeout := TcpUserTimeout} = timeouts(Args),
     %% grpcbox only forwards the per-endpoint connection settings to chatterbox,
     %% the channel options are not consulted for these.
     ConnSettings = #{connect_timeout => ConnectTimeout,
@@ -90,7 +92,7 @@ init(Args) ->
     Channel = iolist_to_binary([PoolName, ":", integer_to_binary(WorkerId)]),
     {ok, _} = start_channel(Channel, Channels, Options),
     logger:debug("[GreptimeDB] genserver has started (~s)~n", [Channel]),
-    {ok, #state{channel = Channel, hints = Hints, timeouts = Timeouts,
+    {ok, #state{channel = Channel, hints = Hints,
                 requests = #{ pending => queue:new(), pending_count => 0}}}.
 
 %% Synchronous requests carry their own deadline: the caller waits past it, and
@@ -124,8 +126,8 @@ handle_call({health_check, Timeout}, _From,
 handle_call(channel, _From, #state{channel = Channel, hints = Hints} = State) ->
     {reply, {ok, Channel, Hints}, State}.
 
-handle_info(?ASYNC_REQ(Request, ExpireAt, ResultCallback), State0) ->
-    Req = ?REQ(Request, ExpireAt),
+handle_info(?ASYNC_REQ(Request, ExpireAt, Timeout, ResultCallback), State0) ->
+    Req = ?REQ(Request, ExpireAt, Timeout),
     State1 = enqueue_req(ResultCallback, Req, State0),
     State = maybe_shoot(State1, false),
     noreply_state(State);
@@ -282,9 +284,10 @@ do_shoot(#state{requests = #{pending := Pending0, pending_count := N} = Requests
 do_shoot(State, _Force) ->
     State.
 
-do_shoot(#state{hints = Hints, timeouts = #{request_timeout := Timeout}} = State0,
-         Requests0, Pending0, N, Channel) ->
-    {{value, ?PEND_REQ(ReplyTo, Req)}, Pending} = queue:out(Pending0),
+do_shoot(#state{hints = Hints} = State0, Requests0, Pending0, N, Channel) ->
+    %% The batch runs on the deadline of the request that opens it; shoot/4 only
+    %% adds requests asking for the same one.
+    {{value, ?PEND_REQ(ReplyTo, ?REQ(_, _, Timeout) = Req)}, Pending} = queue:out(Pending0),
     Requests = Requests0#{pending := Pending, pending_count := N - 1},
     State1 = State0#state{requests = Requests},
     Ctx = new_ctx(Timeout, Hints),
@@ -304,45 +307,51 @@ do_shoot(#state{hints = Hints, timeouts = #{request_timeout := Timeout}} = State
             State1
     end.
 
-shoot(Stream, ?REQ(Req, _),
-      #state{requests = #{pending_count := 0},
-             timeouts = #{request_timeout := Timeout}} = State, ReplyToList) ->
-    %% Write the last request and finish stream. This stream carries no client
-    %% options, so finish/1 cannot resolve the timeout itself.
+shoot(Stream, ?REQ(Req, _, Timeout), State0, ReplyToList) ->
     case greptimedb_stream:write_request(Stream, Req) of
         ok ->
-            Result =  case greptimedb_stream:finish(Stream, caller_timeout(Timeout)) of
-                          {ok, Resp} ->
-                              {ok, Resp};
-                          {error, {?GRPC_STATUS_UNAUTHENTICATED, Msg}, Other} ->
-                              {error, {unauth, Msg, Other}};
-                          Err ->
-                              {error, Err}
-                      end,
-
-            lists:foreach(fun(ReplyTo) ->
-                                  reply(ReplyTo, Result)
-                          end, ReplyToList);
-        Error ->
-            lists:foreach(fun(ReplyTo) ->
-                                  reply(ReplyTo, Error)
-                          end, ReplyToList)
-    end,
-    State;
-
-shoot(Stream, ?REQ(Req, _), #state{requests = #{pending := Pending0, pending_count := N} = Requests0} = State0, ReplyToList) ->
-    case greptimedb_stream:write_request(Stream, Req) of
-        ok ->
-            {{value, ?PEND_REQ(ReplyTo, NextReq)}, Pending} = queue:out(Pending0),
-            Requests = Requests0#{pending := Pending, pending_count := N - 1},
-            State1 = State0#state{requests = Requests},
-            shoot(Stream, NextReq, State1, [ReplyTo | ReplyToList]);
+            case take_next(Timeout, State0) of
+                {ok, ReplyTo, NextReq, State1} ->
+                    shoot(Stream, NextReq, State1, [ReplyTo | ReplyToList]);
+                none ->
+                    finish_batch(Stream, Timeout, State0, ReplyToList)
+            end;
         Error ->
             lists:foreach(fun(ReplyTo) ->
                                   reply(ReplyTo, Error)
                           end, ReplyToList),
             State0
     end.
+
+%% Only requests sharing the batch's deadline can join it: they all ride on the
+%% one context opened for the stream.
+take_next(Timeout,
+          #state{requests = #{pending := Pending0, pending_count := N} = Requests0} = State)
+  when N > 0 ->
+    case queue:peek(Pending0) of
+        {value, ?PEND_REQ(ReplyTo, ?REQ(_, _, Timeout) = NextReq)} ->
+            {_, Pending} = queue:out(Pending0),
+            Requests = Requests0#{pending := Pending, pending_count := N - 1},
+            {ok, ReplyTo, NextReq, State#state{requests = Requests}};
+        _ ->
+            none
+    end;
+take_next(_Timeout, _State) ->
+    none.
+
+finish_batch(Stream, Timeout, State, ReplyToList) ->
+    Result = case greptimedb_stream:finish(Stream, caller_timeout(Timeout)) of
+                 {ok, Resp} ->
+                     {ok, Resp};
+                 {error, {?GRPC_STATUS_UNAUTHENTICATED, Msg}, Other} ->
+                     {error, {unauth, Msg, Other}};
+                 Err ->
+                     {error, Err}
+             end,
+    lists:foreach(fun(ReplyTo) ->
+                          reply(ReplyTo, Result)
+                  end, ReplyToList),
+    State.
 
 %% Continue droping expired requests, to avoid the state RAM usage
 %% explosion if http client can not keep up.
@@ -355,7 +364,7 @@ drop_expired(#{pending_count := 0} = Requests, _Now) ->
     Requests;
 drop_expired(#{pending := Pending, pending_count := PC} = Requests, Now) ->
     {PeekFun, OutFun} = peek_oldest_fn(Requests),
-    {value, ?PEND_REQ(ReplyTo, ?REQ(_, ExpireAt))} = PeekFun(Pending),
+    {value, ?PEND_REQ(ReplyTo, ?REQ(_, ExpireAt, _))} = PeekFun(Pending),
     case is_integer(ExpireAt) andalso Now > ExpireAt of
         true ->
             {_, NewPendings} = OutFun(Pending),
@@ -374,7 +383,7 @@ handle(Pid, Request, #{request_timeout := Timeout}) ->
 
 async_handle(Pid, Request, ResultCallback, #{request_timeout := Timeout}) ->
     ExpireAt = fresh_expire_at(Timeout),
-    _ = erlang:send(Pid, ?ASYNC_REQ(Request, ExpireAt, ResultCallback)),
+    _ = erlang:send(Pid, ?ASYNC_REQ(Request, ExpireAt, Timeout, ResultCallback)),
     ok.
 
 health_check(Pid, #{health_check_timeout := Timeout}) ->

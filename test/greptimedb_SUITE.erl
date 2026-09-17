@@ -17,7 +17,7 @@ all() ->
      t_write,
      t_write_stream,
      t_write_stream_hints,
-     t_reused_pool_applies_caller_timeouts,
+     t_request_timeout_reaches_the_rpc,
      t_write_failure,
      t_write_batch,
      t_bench_perf,
@@ -484,28 +484,40 @@ t_write_stream(_) ->
     greptimedb:stop_client(Client),
     ok.
 
-t_reused_pool_applies_caller_timeouts(_) ->
-    Metric = <<"reused_pool_timeouts">>,
+t_request_timeout_reaches_the_rpc(_) ->
+    Metric = <<"request_timeout_deadlines">>,
+    drop_table(Metric),
     Options =
         fun(RequestTimeout) ->
            [{endpoints, [{http, greptime_host(), 4001}]},
-            {pool, greptimedb_reused_pool},
+            {pool, greptimedb_deadline_pool},
             {pool_size, 1},
             {request_timeout, RequestTimeout},
+            {grpc_opts, deadline_reporting_interceptors(self())},
             {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}]
         end,
 
-    {ok, Client} = greptimedb:start_client(Options(10_000)),
+    {ok, Client} = greptimedb:start_client(Options(5_000)),
     try
         ok = wait_alive(Client),
-        %% Reusing a pool does not reconfigure its workers, but every request
-        %% carries its own deadline. A 1 ms client times out on its own writes
-        %% without shortening anyone else's, and its caller cannot give up
-        %% before the deadline it set.
-        {error, {already_started, Impatient}} = greptimedb:start_client(Options(1)),
-        ?assertMatch({ok, _}, greptimedb:write(Client, Metric, points(1))),
-        ?assertMatch({error, _}, greptimedb:write(Impatient, Metric, points(1))),
-        ?assertMatch({ok, _}, greptimedb:write(Client, Metric, points(1)))
+        flush_deadlines(),
+
+        {ok, _} = greptimedb:write(Client, Metric, points(1)),
+        assert_deadline(5_000, recv_deadline(unary)),
+        ok = await_async_write(Client, Metric),
+        assert_deadline(5_000, recv_deadline(stream)),
+
+        %% Reusing the pool does not reconfigure its workers, but every request
+        %% carries the deadline its own caller asked for.
+        {error, {already_started, Impatient}} = greptimedb:start_client(Options(1_000)),
+        {ok, _} = greptimedb:write(Impatient, Metric, points(1)),
+        assert_deadline(1_000, recv_deadline(unary)),
+        ok = await_async_write(Impatient, Metric),
+        assert_deadline(1_000, recv_deadline(stream)),
+
+        %% and leaves the deadline of the client that started the pool alone
+        {ok, _} = greptimedb:write(Client, Metric, points(1)),
+        assert_deadline(5_000, recv_deadline(unary))
     after
         greptimedb:stop_client(Client)
     end,
@@ -1284,6 +1296,63 @@ t_insert_requests_metric_formats(_) ->
     {value, TsSchema} =
         lists:search(fun(S) -> maps:get(column_name, S) == <<"greptime_timestamp">> end, Schema),
     ?assertEqual('TIMESTAMP_SECOND', maps:get(datatype, TsSchema)).
+
+%% Report the deadline each RPC actually carries, so a test can assert on it
+%% instead of on how long a request happens to take.
+deadline_reporting_interceptors(Pid) ->
+    Report =
+        fun(Tag, Ctx) ->
+           Pid ! {deadline, Tag, grpcbox_utils:get_timeout_from_ctx(Ctx, undefined)},
+           ok
+        end,
+    #{unary_interceptor =>
+          fun(Ctx, _Channel, Handler, _Path, Input, _Def, _Options) ->
+             Report(unary, Ctx),
+             Handler(Ctx, Input)
+          end,
+      stream_interceptor =>
+          #{new_stream =>
+                fun(Ctx, Channel, Path, Def, NewStream, Options) ->
+                   Report(stream, Ctx),
+                   NewStream(Ctx, Channel, Path, Def, Options)
+                end,
+            send_msg => fun(Stream, SendMsg, Input) -> SendMsg(Stream, Input) end,
+            recv_msg => fun(Stream, RecvMsg, Timeout) -> RecvMsg(Stream, Timeout) end}}.
+
+recv_deadline(Tag) ->
+    receive
+        {deadline, Tag, Deadline} ->
+            Deadline
+    after 10_000 ->
+        error({no_deadline_reported, Tag})
+    end.
+
+flush_deadlines() ->
+    receive
+        {deadline, _, _} ->
+            flush_deadlines()
+    after 0 ->
+        ok
+    end.
+
+%% The deadline left when the RPC starts is a hair under what was configured.
+assert_deadline(Configured, Reported) ->
+    ?assert(is_integer(Reported)),
+    ?assert(Reported =< Configured),
+    ?assert(Reported > Configured - 1_000).
+
+await_async_write(Client, Metric) ->
+    Ref = make_ref(),
+    Self = self(),
+    ok = greptimedb:async_write(Client, Metric, points(1), {fun(R) -> Self ! {Ref, R} end, []}),
+    receive
+        {Ref, {ok, _}} ->
+            ok;
+        {Ref, Other} ->
+            error({async_write_failed, Other})
+    after 15_000 ->
+        error(async_write_timeout)
+    end.
 
 %% A pool is usable a moment after start_client/1 returns: the grpcbox channel
 %% connects its endpoints from a gen_statem event, so picking one right away can
