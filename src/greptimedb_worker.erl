@@ -20,21 +20,33 @@
 
 -include_lib("grpcbox/include/grpcbox.hrl").
 
--export([handle/2, stream/1, ddl/0, health_check/1]).
--export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, async_handle/3]).
+-export([handle/3, stream/2, ddl/0, health_check/2, timeouts/1]).
+-export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, async_handle/4]).
 -export([connect/1]).
 
--record(state, {channel, requests, hints}).
+-export_type([timeouts/0]).
+
+-type timeouts() :: #{connect_timeout := pos_integer(),
+                      request_timeout := pos_integer(),
+                      health_check_timeout := pos_integer(),
+                      tcp_user_timeout := non_neg_integer()}.
+
+-record(state, {channel, requests, hints, timeouts}).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--define(CALL_TIMEOUT, 12_000).
--define(HEALTH_CHECK_TIMEOUT, 1_000).
--define(REQUEST_TIMEOUT, 10_000).
+-define(DEFAULT_CONNECT_TIMEOUT, 5_000).
+-define(DEFAULT_REQUEST_TIMEOUT, 10_000).
+-define(DEFAULT_HEALTH_CHECK_TIMEOUT, 1_000).
+%% 0 leaves TCP_USER_TIMEOUT untouched, which is the chatterbox default.
+-define(DEFAULT_TCP_USER_TIMEOUT, 0).
+%% How long a caller waits on top of the gRPC deadline. Without this margin the
+%% caller gives up first and reports a gen_server timeout instead of the real
+%% gRPC error.
+-define(CALL_TIMEOUT_MARGIN, 2_000).
 -define(GTDB_HINT_HEADER, <<"x-greptime-hints">>).
--define(CONNECT_TIMEOUT, 5_000).
 -define(ASYNC_BATCH_SIZE, 200).
 -define(ASYNC_BATCH_LINGER, 20).
 -define(ASYNC_REQ(Req, ExpireAt, ResultCallback),
@@ -66,17 +78,27 @@ init(Args) ->
                               Acc#{?GTDB_HINT_HEADER => <<OldValue/binary, Sep/binary, Key/binary,"=",Value/binary>>}
                       end, #{?GTDB_HINT_HEADER => <<>>}, Hints0),
     SslOptions = proplists:get_value(ssl_opts, Args, []),
-    Options = proplists:get_value(grpc_opts, Args, #{connect_timeout => ?CONNECT_TIMEOUT}),
+    Options = proplists:get_value(grpc_opts, Args, #{}),
+    #{connect_timeout := ConnectTimeout,
+      tcp_user_timeout := TcpUserTimeout} = Timeouts = timeouts(Args),
+    %% grpcbox only forwards the per-endpoint connection settings to chatterbox,
+    %% the channel options are not consulted for these.
+    ConnSettings = #{connect_timeout => ConnectTimeout,
+                     tcp_user_timeout => TcpUserTimeout},
     Channels =
-        lists:map(fun({Scheme, Host, Port}) -> {Scheme, Host, Port, ssl_options(Scheme, SslOptions)}
+        lists:map(fun({Scheme, Host, Port}) ->
+                     {Scheme, Host, Port, ssl_options(Scheme, SslOptions), ConnSettings}
                   end, Endpoints),
     Channel = iolist_to_binary([PoolName, ":", integer_to_binary(WorkerId)]),
     {ok, _} = start_channel(Channel, Channels, Options),
     logger:debug("[GreptimeDB] genserver has started (~s)~n", [Channel]),
-    {ok, #state{channel = Channel, hints = Hints, requests = #{ pending => queue:new(), pending_count => 0}}}.
+    {ok, #state{channel = Channel, hints = Hints, timeouts = Timeouts,
+                requests = #{ pending => queue:new(), pending_count => 0}}}.
 
-handle_call({handle, Request}, _From, #state{channel = Channel, hints = Hints} = State) ->
-    Ctx = new_ctx(?REQUEST_TIMEOUT, Hints),
+handle_call({handle, Request}, _From,
+            #state{channel = Channel, hints = Hints,
+                   timeouts = #{request_timeout := Timeout}} = State) ->
+    Ctx = new_ctx(Timeout, Hints),
     Reply = greptime_v_1_greptime_database_client:handle(Ctx, Request, #{channel => Channel}),
     logger:debug("[GreptimeDB] handle_call reply: ~w~n", [Reply]),
     case Reply of
@@ -87,9 +109,11 @@ handle_call({handle, Request}, _From, #state{channel = Channel, hints = Hints} =
         Err ->
             {reply, Err, State}
     end;
-handle_call(health_check, _From, #state{channel = Channel, hints = Hints} = State) ->
+handle_call(health_check, _From,
+            #state{channel = Channel, hints = Hints,
+                   timeouts = #{health_check_timeout := Timeout}} = State) ->
     Request = #{},
-    Ctx = new_ctx(?HEALTH_CHECK_TIMEOUT, Hints),
+    Ctx = new_ctx(Timeout, Hints),
     Reply =
         greptime_v_1_health_check_client:health_check(Ctx, Request, #{channel => Channel}),
     case Reply of
@@ -132,6 +156,23 @@ terminate(Reason, #state{channel = Channel} = State) ->
 %%%===================================================================
 %%% Helper functions
 %%%===================================================================
+
+%% @doc Resolve the timeouts from the client options. Both the pool workers and
+%% their callers derive their timeouts from the same options.
+-spec timeouts(list()) -> timeouts().
+timeouts(Options) ->
+    GrpcOpts = proplists:get_value(grpc_opts, Options, #{}),
+    ConnectTimeout = maps:get(connect_timeout, GrpcOpts, ?DEFAULT_CONNECT_TIMEOUT),
+    #{connect_timeout => proplists:get_value(connect_timeout, Options, ConnectTimeout),
+      request_timeout => proplists:get_value(request_timeout, Options, ?DEFAULT_REQUEST_TIMEOUT),
+      health_check_timeout =>
+          proplists:get_value(health_check_timeout, Options, ?DEFAULT_HEALTH_CHECK_TIMEOUT),
+      tcp_user_timeout =>
+          proplists:get_value(tcp_user_timeout, Options, ?DEFAULT_TCP_USER_TIMEOUT)}.
+
+call_timeout(Key, Timeouts) ->
+    maps:get(Key, Timeouts) + ?CALL_TIMEOUT_MARGIN.
+
 start_channel(Channel, Channels, Options) ->
     case grpcbox_channel_sup:start_child(Channel, Channels, Options) of
         {error, {already_started, StaleChannel}} ->
@@ -249,11 +290,12 @@ do_shoot(#state{requests = #{pending := Pending0, pending_count := N} = Requests
 do_shoot(State, _Force) ->
     State.
 
-do_shoot(#state{hints = Hints} = State0, Requests0, Pending0, N, Channel) ->
+do_shoot(#state{hints = Hints, timeouts = #{request_timeout := Timeout}} = State0,
+         Requests0, Pending0, N, Channel) ->
     {{value, ?PEND_REQ(ReplyTo, Req)}, Pending} = queue:out(Pending0),
     Requests = Requests0#{pending := Pending, pending_count := N - 1},
     State1 = State0#state{requests = Requests},
-    Ctx = new_ctx(?REQUEST_TIMEOUT, Hints),
+    Ctx = new_ctx(Timeout, Hints),
     try
         case greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}) of
             {ok, Stream} ->
@@ -332,22 +374,22 @@ drop_expired(#{pending := Pending, pending_count := PC} = Requests, Now) ->
 %%%===================================================================
 %%% Public functions
 %%%===================================================================
-handle(Pid, Request) ->
-    gen_server:call(Pid, {handle, Request}, ?CALL_TIMEOUT).
+handle(Pid, Request, Timeouts) ->
+    gen_server:call(Pid, {handle, Request}, call_timeout(request_timeout, Timeouts)).
 
-async_handle(Pid, Request, ResultCallback) ->
-    ExpireAt = fresh_expire_at(?REQUEST_TIMEOUT),
+async_handle(Pid, Request, ResultCallback, #{request_timeout := Timeout}) ->
+    ExpireAt = fresh_expire_at(Timeout),
     _ = erlang:send(Pid, ?ASYNC_REQ(Request, ExpireAt, ResultCallback)),
     ok.
 
-health_check(Pid) ->
-    gen_server:call(Pid, health_check, ?HEALTH_CHECK_TIMEOUT).
+health_check(Pid, Timeouts) ->
+    gen_server:call(Pid, health_check, call_timeout(health_check_timeout, Timeouts)).
 
-stream(Pid) ->
+stream(Pid, #{request_timeout := Timeout} = Timeouts) ->
     try
-        case gen_server:call(Pid, channel, ?CALL_TIMEOUT) of
+        case gen_server:call(Pid, channel, call_timeout(request_timeout, Timeouts)) of
             {ok, Channel} ->
-                Ctx = ctx:with_deadline_after(?REQUEST_TIMEOUT, millisecond),
+                Ctx = ctx:with_deadline_after(Timeout, millisecond),
                 greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel});
             Err -> Err
         end
@@ -371,6 +413,22 @@ connect(Options) ->
 %%% Tests
 %%%===================================================================
 -ifdef(TEST).
+
+timeouts_test() ->
+    ?assertEqual(#{connect_timeout => ?DEFAULT_CONNECT_TIMEOUT,
+                   request_timeout => ?DEFAULT_REQUEST_TIMEOUT,
+                   health_check_timeout => ?DEFAULT_HEALTH_CHECK_TIMEOUT,
+                   tcp_user_timeout => ?DEFAULT_TCP_USER_TIMEOUT},
+                 timeouts([])),
+    ?assertMatch(#{tcp_user_timeout := 30_000},
+                 timeouts([{tcp_user_timeout, 30_000}])),
+    ?assertMatch(#{request_timeout := 3_000, health_check_timeout := 4_000},
+                 timeouts([{request_timeout, 3_000}, {health_check_timeout, 4_000}])),
+    ?assertMatch(#{connect_timeout := 2_000},
+                 timeouts([{grpc_opts, #{connect_timeout => 2_000}}])),
+    %% The dedicated option wins over the one carried by grpc_opts
+    ?assertMatch(#{connect_timeout := 1_000},
+                 timeouts([{connect_timeout, 1_000}, {grpc_opts, #{connect_timeout => 2_000}}])).
 
 prioritise_latest_test() ->
     Opts = #{prioritise_latest => true},

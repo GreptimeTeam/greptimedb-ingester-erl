@@ -41,7 +41,8 @@ start_client(Options0) ->
     Client =
         #{pool => Pool,
           protocol => http,
-          cli_opts => Options},
+          cli_opts => Options,
+          timeouts => greptimedb_worker:timeouts(Options)},
     case ecpool:start_sup_pool(Pool, greptimedb_worker, Options) of
         {ok, _} ->
             {ok, Client};
@@ -133,8 +134,9 @@ stop_client(#{pool := Pool}) ->
 %%% Internal functions
 %%%===================================================================
 
-handle(#{pool := Pool} = _Client, Request) ->
-    Fun = fun(Worker) -> greptimedb_worker:handle(Worker, Request) end,
+handle(#{pool := Pool} = Client, Request) ->
+    Timeouts = timeouts(Client),
+    Fun = fun(Worker) -> greptimedb_worker:handle(Worker, Request, Timeouts) end,
     try
         ecpool:with_client(Pool, Fun)
     catch
@@ -143,8 +145,11 @@ handle(#{pool := Pool} = _Client, Request) ->
             {error, {E, R}}
     end.
 
-async_handle(#{pool := Pool} = _Client, Request, ResultCallback) ->
-    Fun = fun(Worker) -> greptimedb_worker:async_handle(Worker, Request, ResultCallback) end,
+async_handle(#{pool := Pool} = Client, Request, ResultCallback) ->
+    Timeouts = timeouts(Client),
+    Fun = fun(Worker) ->
+             greptimedb_worker:async_handle(Worker, Request, ResultCallback, Timeouts)
+          end,
     try
         ecpool:with_client(Pool, Fun)
     catch
@@ -153,8 +158,9 @@ async_handle(#{pool := Pool} = _Client, Request, ResultCallback) ->
             {error, {E, R}}
     end.
 
-health_check(#{pool := Pool} = _Client) ->
-    Fun = fun(Worker) -> greptimedb_worker:health_check(Worker) end,
+health_check(#{pool := Pool} = Client) ->
+    Timeouts = timeouts(Client),
+    Fun = fun(Worker) -> greptimedb_worker:health_check(Worker, Timeouts) end,
     try
         ecpool:with_client(Pool, Fun)
     catch
@@ -163,9 +169,10 @@ health_check(#{pool := Pool} = _Client) ->
             {error, {E, R}}
     end.
 
-rpc_write_stream(#{pool := Pool, cli_opts := Options} = _Client) ->
+rpc_write_stream(#{pool := Pool, cli_opts := Options} = Client) ->
+    Timeouts = timeouts(Client),
     Fun = fun(Worker) ->
-             case greptimedb_worker:stream(Worker) of
+             case greptimedb_worker:stream(Worker, Timeouts) of
                  {ok, S} ->
                      {ok, S#{cli_opts => Options}};
                  Other ->
@@ -179,6 +186,11 @@ rpc_write_stream(#{pool := Pool, cli_opts := Options} = _Client) ->
             logger:error("[GreptimeDB] grpc write fail: ~0p ~0p ~0p", [E, R, S]),
             {error, {E, R}}
     end.
+
+timeouts(#{timeouts := Timeouts}) ->
+    Timeouts;
+timeouts(#{cli_opts := Options}) ->
+    greptimedb_worker:timeouts(Options).
 
 maybe_return_reason({error, Reason}, true) ->
     {false, Reason};
