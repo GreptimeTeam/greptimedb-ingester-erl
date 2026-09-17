@@ -18,6 +18,7 @@ all() ->
      t_write_stream,
      t_write_stream_hints,
      t_request_timeout_reaches_the_rpc,
+     t_async_finish_wait_excludes_stream_setup,
      t_write_failure,
      t_write_batch,
      t_bench_perf,
@@ -482,6 +483,53 @@ t_write_stream(_) ->
 
     {ok, #{response := {affected_rows, #{value := 55}}}} = greptimedb_stream:finish(Stream),
     greptimedb:stop_client(Client),
+    ok.
+
+t_async_finish_wait_excludes_stream_setup(_) ->
+    Metric = <<"async_finish_budget">>,
+    drop_table(Metric),
+    Self = self(),
+    SetupDelay = 1_000,
+    RequestTimeout = 3_000,
+    Options =
+        [{endpoints, [{http, greptime_host(), 4001}]},
+         {pool, greptimedb_finish_budget_pool},
+         {pool_size, 1},
+         {request_timeout, RequestTimeout},
+         {grpc_opts,
+          #{stream_interceptor =>
+                #{new_stream =>
+                      fun(Ctx, Channel, Path, Def, NewStream, Opts) ->
+                         timer:sleep(SetupDelay),
+                         NewStream(Ctx, Channel, Path, Def, Opts)
+                      end,
+                  send_msg => fun(Stream, SendMsg, Input) -> SendMsg(Stream, Input) end,
+                  recv_msg =>
+                      fun(Stream, RecvMsg, Timeout) ->
+                         Self ! {finish_wait, Timeout},
+                         RecvMsg(Stream, Timeout)
+                      end}}},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    try
+        ok = wait_alive(Client),
+        ok = await_async_write(Client, Metric),
+        Wait =
+            receive
+                {finish_wait, W} ->
+                    W
+            after 15_000 ->
+                error(no_finish_wait_reported)
+            end,
+        %% Opening the stream spent part of the budget the context runs on, so
+        %% the receive waits on what is left of it, not on the whole timeout.
+        Expected = RequestTimeout - SetupDelay + 2_000,
+        ?assert(Wait =< Expected),
+        ?assert(Wait > Expected - 500)
+    after
+        greptimedb:stop_client(Client)
+    end,
     ok.
 
 t_request_timeout_reaches_the_rpc(_) ->

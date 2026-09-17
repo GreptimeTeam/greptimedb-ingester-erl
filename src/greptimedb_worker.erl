@@ -288,12 +288,11 @@ do_shoot(#state{hints = Hints} = State0, Requests0, Pending0, N, Channel) ->
     State1 = State0#state{requests = Requests},
     %% Queueing time counts against the deadline. The opening request has the
     %% least left of the batch, so the whole batch runs on its remainder.
-    Deadline = remaining(ExpireAt, Timeout),
-    Ctx = new_ctx(Deadline, Hints),
+    Ctx = new_ctx(remaining(ExpireAt, Timeout), Hints),
     try
         case greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}) of
             {ok, Stream} ->
-                shoot(Stream, Req, {Timeout, Deadline}, State1, [ReplyTo]);
+                shoot(Stream, Req, {Timeout, ExpireAt}, State1, [ReplyTo]);
             Error ->
                 reply(ReplyTo, Error),
                 State1
@@ -306,14 +305,16 @@ do_shoot(#state{hints = Hints} = State0, Requests0, Pending0, N, Channel) ->
             State1
     end.
 
-shoot(Stream, ?REQ(Req, _, _), {Timeout, Deadline} = Batch, State0, ReplyToList) ->
+shoot(Stream, ?REQ(Req, _, _), {Timeout, ExpireAt} = Batch, State0, ReplyToList) ->
     case greptimedb_stream:write_request(Stream, Req) of
         ok ->
             case take_next(Timeout, State0) of
                 {ok, ReplyTo, NextReq, State1} ->
                     shoot(Stream, NextReq, Batch, State1, [ReplyTo | ReplyToList]);
                 {none, State1} ->
-                    finish_batch(Stream, Deadline, State1, ReplyToList)
+                    %% Recomputed here: opening the stream and sending spent part
+                    %% of the budget the context already runs on.
+                    finish_batch(Stream, remaining(ExpireAt, Timeout), State1, ReplyToList)
             end;
         Error ->
             lists:foreach(fun(ReplyTo) ->
