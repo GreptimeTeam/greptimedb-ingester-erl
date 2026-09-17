@@ -17,6 +17,7 @@ all() ->
      t_write,
      t_write_stream,
      t_write_stream_hints,
+     t_reused_pool_keeps_timeouts,
      t_write_failure,
      t_write_batch,
      t_bench_perf,
@@ -483,6 +484,29 @@ t_write_stream(_) ->
     greptimedb:stop_client(Client),
     ok.
 
+t_reused_pool_keeps_timeouts(_) ->
+    Options =
+        fun(HealthCheckTimeout) ->
+           [{endpoints, [{http, greptime_host(), 4001}]},
+            {pool, greptimedb_reused_pool},
+            {pool_size, 1},
+            {health_check_timeout, HealthCheckTimeout},
+            {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}]
+        end,
+
+    {ok, Client} = greptimedb:start_client(Options(3_000)),
+    try
+        ok = wait_alive(Client),
+        %% The second start does not reconfigure the running workers, so the
+        %% client it hands back must not claim the new timeouts either.
+        {error, {already_started, Reused}} = greptimedb:start_client(Options(100)),
+        ?assertEqual(maps:get(timeouts, Client), maps:get(timeouts, Reused)),
+        ?assert(greptimedb:is_alive(Reused))
+    after
+        greptimedb:stop_client(Client)
+    end,
+    ok.
+
 t_write_stream_hints(_) ->
     Metric = <<"temperatures_stream_hints">>,
     drop_table(Metric),
@@ -494,6 +518,7 @@ t_write_stream_hints(_) ->
          {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
 
     {ok, Client} = greptimedb:start_client(Options),
+    ok = wait_alive(Client),
     {ok, Stream} = greptimedb:write_stream(Client),
     ok = greptimedb_stream:write(Stream, Metric, points(1)),
     {ok, #{response := {affected_rows, #{value := 1}}}} = greptimedb_stream:finish(Stream),
@@ -1255,6 +1280,23 @@ t_insert_requests_metric_formats(_) ->
     {value, TsSchema} =
         lists:search(fun(S) -> maps:get(column_name, S) == <<"greptime_timestamp">> end, Schema),
     ?assertEqual('TIMESTAMP_SECOND', maps:get(datatype, TsSchema)).
+
+%% A pool is usable a moment after start_client/1 returns: the grpcbox channel
+%% connects its endpoints from a gen_statem event, so picking one right away can
+%% still fail with no_endpoints.
+wait_alive(Client) ->
+    wait_alive(Client, 50).
+
+wait_alive(Client, 0) ->
+    error({not_alive, greptimedb:is_alive(Client, true)});
+wait_alive(Client, N) ->
+    case greptimedb:is_alive(Client) of
+        true ->
+            ok;
+        false ->
+            timer:sleep(100),
+            wait_alive(Client, N - 1)
+    end.
 
 %% Helper function to execute SQL query and return pretty-printed JSON
 execute_sql_query(Sql) ->

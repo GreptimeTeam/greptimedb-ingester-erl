@@ -47,7 +47,10 @@ start_client(Options0) ->
         {ok, _} ->
             {ok, Client};
         {error, {already_started, _}} ->
-            {error, {already_started, Client}};
+            %% The running pool keeps the timeouts it was started with. A caller
+            %% waits past the deadline the worker sets, so it has to read them
+            %% off the pool rather than off these options.
+            {error, {already_started, Client#{timeouts => running_timeouts(Client)}}};
         {error, Reason} ->
             {error, Reason}
     end.
@@ -191,6 +194,18 @@ timeouts(#{timeouts := Timeouts}) ->
     Timeouts;
 timeouts(#{cli_opts := Options}) ->
     greptimedb_worker:timeouts(Options).
+
+running_timeouts(#{pool := Pool, timeouts := Fallback}) ->
+    try ecpool:with_client(Pool, fun greptimedb_worker:running_timeouts/1) of
+        {ok, Timeouts} ->
+            Timeouts;
+        _ ->
+            Fallback
+    catch
+        E:R:S ->
+            logger:error("[GreptimeDB] failed to read pool timeouts: ~0p ~0p ~0p", [E, R, S]),
+            Fallback
+    end.
 
 maybe_return_reason({error, Reason}, true) ->
     {false, Reason};

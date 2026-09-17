@@ -20,7 +20,8 @@
 
 -include_lib("grpcbox/include/grpcbox.hrl").
 
--export([handle/3, stream/2, ddl/0, health_check/2, timeouts/1, caller_timeout/2]).
+-export([handle/3, stream/2, ddl/0, health_check/2, timeouts/1, running_timeouts/1,
+         caller_timeout/2]).
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, async_handle/4]).
 -export([connect/1]).
 
@@ -121,7 +122,9 @@ handle_call(health_check, _From,
             {reply, Err, State}
     end;
 handle_call(channel, _From, #state{channel = Channel, hints = Hints} = State) ->
-    {reply, {ok, Channel, Hints}, State}.
+    {reply, {ok, Channel, Hints}, State};
+handle_call(timeouts, _From, #state{timeouts = Timeouts} = State) ->
+    {reply, {ok, Timeouts}, State}.
 
 handle_info(?ASYNC_REQ(Request, ExpireAt, ResultCallback), State0) ->
     Req = ?REQ(Request, ExpireAt),
@@ -378,6 +381,11 @@ async_handle(Pid, Request, ResultCallback, #{request_timeout := Timeout}) ->
 
 health_check(Pid, Timeouts) ->
     gen_server:call(Pid, health_check, caller_timeout(health_check_timeout, Timeouts)).
+
+%% @doc The timeouts a running worker was started with. A reused pool keeps
+%% them, so they can differ from what a later caller's options resolve to.
+running_timeouts(Pid) ->
+    gen_server:call(Pid, timeouts, ?CALLER_TIMEOUT_MARGIN).
 
 stream(Pid, #{request_timeout := Timeout} = Timeouts) ->
     try
