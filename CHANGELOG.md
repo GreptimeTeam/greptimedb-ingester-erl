@@ -31,10 +31,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   error. The caller and the gRPC deadline were both 1000 ms, so the caller always
   gave up first. Every caller now waits 2000 ms beyond the deadline it set,
   `greptimedb_stream:finish/1` included.
-- Starting a client on a pool that is already running now reports the timeouts
-  that pool actually uses. It reported the ones its own options resolved to,
-  while the running workers kept their original deadlines, so a caller could
-  give up before the deadline it believed it had set.
+- A caller can no longer give up before the deadline it set. `request_timeout`
+  and `health_check_timeout` now travel with each request, so the wait and the
+  gRPC deadline always come from the same options. They used to be read
+  separately by the caller and by the worker, which disagreed whenever a pool
+  was started a second time with different options.
 - `grpc_hints` are now sent on streaming writes. `write_stream/1` built its
   context without the hint header, so table options such as `ttl` and
   `append_mode` were silently dropped on tables created through a stream.

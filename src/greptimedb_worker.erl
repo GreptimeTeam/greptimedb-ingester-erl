@@ -20,8 +20,7 @@
 
 -include_lib("grpcbox/include/grpcbox.hrl").
 
--export([handle/3, stream/2, ddl/0, health_check/2, timeouts/1, running_timeouts/1,
-         caller_timeout/2]).
+-export([handle/3, stream/2, ddl/0, health_check/2, timeouts/1, caller_timeout/1]).
 -export([start_link/1, init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, async_handle/4]).
 -export([connect/1]).
 
@@ -94,9 +93,11 @@ init(Args) ->
     {ok, #state{channel = Channel, hints = Hints, timeouts = Timeouts,
                 requests = #{ pending => queue:new(), pending_count => 0}}}.
 
-handle_call({handle, Request}, _From,
-            #state{channel = Channel, hints = Hints,
-                   timeouts = #{request_timeout := Timeout}} = State) ->
+%% Synchronous requests carry their own deadline: the caller waits past it, and
+%% deriving both from the same value is what keeps the two in step even when a
+%% pool is shared by clients started with different options.
+handle_call({handle, Request, Timeout}, _From,
+            #state{channel = Channel, hints = Hints} = State) ->
     Ctx = new_ctx(Timeout, Hints),
     Reply = greptime_v_1_greptime_database_client:handle(Ctx, Request, #{channel => Channel}),
     logger:debug("[GreptimeDB] handle_call reply: ~w~n", [Reply]),
@@ -108,9 +109,8 @@ handle_call({handle, Request}, _From,
         Err ->
             {reply, Err, State}
     end;
-handle_call(health_check, _From,
-            #state{channel = Channel, hints = Hints,
-                   timeouts = #{health_check_timeout := Timeout}} = State) ->
+handle_call({health_check, Timeout}, _From,
+            #state{channel = Channel, hints = Hints} = State) ->
     Request = #{},
     Ctx = new_ctx(Timeout, Hints),
     Reply =
@@ -122,9 +122,7 @@ handle_call(health_check, _From,
             {reply, Err, State}
     end;
 handle_call(channel, _From, #state{channel = Channel, hints = Hints} = State) ->
-    {reply, {ok, Channel, Hints}, State};
-handle_call(timeouts, _From, #state{timeouts = Timeouts} = State) ->
-    {reply, {ok, Timeouts}, State}.
+    {reply, {ok, Channel, Hints}, State}.
 
 handle_info(?ASYNC_REQ(Request, ExpireAt, ResultCallback), State0) ->
     Req = ?REQ(Request, ExpireAt),
@@ -171,9 +169,9 @@ timeouts(Options) ->
       tcp_user_timeout =>
           proplists:get_value(tcp_user_timeout, Options, ?DEFAULT_TCP_USER_TIMEOUT)}.
 
--spec caller_timeout(request_timeout | health_check_timeout, timeouts()) -> pos_integer().
-caller_timeout(Key, Timeouts) ->
-    maps:get(Key, Timeouts) + ?CALLER_TIMEOUT_MARGIN.
+-spec caller_timeout(pos_integer()) -> pos_integer().
+caller_timeout(Timeout) ->
+    Timeout + ?CALLER_TIMEOUT_MARGIN.
 
 start_channel(Channel, Channels, Options) ->
     case grpcbox_channel_sup:start_child(Channel, Channels, Options) of
@@ -307,13 +305,13 @@ do_shoot(#state{hints = Hints, timeouts = #{request_timeout := Timeout}} = State
     end.
 
 shoot(Stream, ?REQ(Req, _),
-      #state{requests = #{pending_count := 0}, timeouts = Timeouts} = State, ReplyToList) ->
-    %% Write the last request and finish stream. This stream carries no
-    %% cli_opts, so finish/1 cannot resolve the timeout itself.
+      #state{requests = #{pending_count := 0},
+             timeouts = #{request_timeout := Timeout}} = State, ReplyToList) ->
+    %% Write the last request and finish stream. This stream carries no client
+    %% options, so finish/1 cannot resolve the timeout itself.
     case greptimedb_stream:write_request(Stream, Req) of
         ok ->
-            Result =  case greptimedb_stream:finish(
-                             Stream, caller_timeout(request_timeout, Timeouts)) of
+            Result =  case greptimedb_stream:finish(Stream, caller_timeout(Timeout)) of
                           {ok, Resp} ->
                               {ok, Resp};
                           {error, {?GRPC_STATUS_UNAUTHENTICATED, Msg}, Other} ->
@@ -371,25 +369,20 @@ drop_expired(#{pending := Pending, pending_count := PC} = Requests, Now) ->
 %%%===================================================================
 %%% Public functions
 %%%===================================================================
-handle(Pid, Request, Timeouts) ->
-    gen_server:call(Pid, {handle, Request}, caller_timeout(request_timeout, Timeouts)).
+handle(Pid, Request, #{request_timeout := Timeout}) ->
+    gen_server:call(Pid, {handle, Request, Timeout}, caller_timeout(Timeout)).
 
 async_handle(Pid, Request, ResultCallback, #{request_timeout := Timeout}) ->
     ExpireAt = fresh_expire_at(Timeout),
     _ = erlang:send(Pid, ?ASYNC_REQ(Request, ExpireAt, ResultCallback)),
     ok.
 
-health_check(Pid, Timeouts) ->
-    gen_server:call(Pid, health_check, caller_timeout(health_check_timeout, Timeouts)).
+health_check(Pid, #{health_check_timeout := Timeout}) ->
+    gen_server:call(Pid, {health_check, Timeout}, caller_timeout(Timeout)).
 
-%% @doc The timeouts a running worker was started with. A reused pool keeps
-%% them, so they can differ from what a later caller's options resolve to.
-running_timeouts(Pid) ->
-    gen_server:call(Pid, timeouts, ?CALLER_TIMEOUT_MARGIN).
-
-stream(Pid, #{request_timeout := Timeout} = Timeouts) ->
+stream(Pid, #{request_timeout := Timeout}) ->
     try
-        case gen_server:call(Pid, channel, caller_timeout(request_timeout, Timeouts)) of
+        case gen_server:call(Pid, channel, caller_timeout(Timeout)) of
             {ok, Channel, Hints} ->
                 %% The stream must be created by the calling process: grpcbox
                 %% delivers its messages to whoever opened it.

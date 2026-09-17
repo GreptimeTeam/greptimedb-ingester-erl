@@ -47,10 +47,7 @@ start_client(Options0) ->
         {ok, _} ->
             {ok, Client};
         {error, {already_started, _}} ->
-            %% The running pool keeps the timeouts it was started with. A caller
-            %% waits past the deadline the worker sets, so it has to read them
-            %% off the pool rather than off these options.
-            {error, {already_started, Client#{timeouts => running_timeouts(Client)}}};
+            {error, {already_started, Client}};
         {error, Reason} ->
             {error, Reason}
     end.
@@ -177,7 +174,9 @@ rpc_write_stream(#{pool := Pool, cli_opts := Options} = Client) ->
     Fun = fun(Worker) ->
              case greptimedb_worker:stream(Worker, Timeouts) of
                  {ok, S} ->
-                     {ok, S#{cli_opts => Options}};
+                     %% finish/1 waits on the deadline set here, so it reads the
+                     %% same resolved timeouts rather than re-deriving its own.
+                     {ok, S#{cli_opts => Options, timeouts => Timeouts}};
                  Other ->
                      Other
              end
@@ -195,17 +194,6 @@ timeouts(#{timeouts := Timeouts}) ->
 timeouts(#{cli_opts := Options}) ->
     greptimedb_worker:timeouts(Options).
 
-running_timeouts(#{pool := Pool, timeouts := Fallback}) ->
-    try ecpool:with_client(Pool, fun greptimedb_worker:running_timeouts/1) of
-        {ok, Timeouts} ->
-            Timeouts;
-        _ ->
-            Fallback
-    catch
-        E:R:S ->
-            logger:error("[GreptimeDB] failed to read pool timeouts: ~0p ~0p ~0p", [E, R, S]),
-            Fallback
-    end.
 
 maybe_return_reason({error, Reason}, true) ->
     {false, Reason};

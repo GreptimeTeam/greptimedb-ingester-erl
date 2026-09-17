@@ -17,7 +17,7 @@ all() ->
      t_write,
      t_write_stream,
      t_write_stream_hints,
-     t_reused_pool_keeps_timeouts,
+     t_reused_pool_applies_caller_timeouts,
      t_write_failure,
      t_write_batch,
      t_bench_perf,
@@ -484,24 +484,28 @@ t_write_stream(_) ->
     greptimedb:stop_client(Client),
     ok.
 
-t_reused_pool_keeps_timeouts(_) ->
+t_reused_pool_applies_caller_timeouts(_) ->
+    Metric = <<"reused_pool_timeouts">>,
     Options =
-        fun(HealthCheckTimeout) ->
+        fun(RequestTimeout) ->
            [{endpoints, [{http, greptime_host(), 4001}]},
             {pool, greptimedb_reused_pool},
             {pool_size, 1},
-            {health_check_timeout, HealthCheckTimeout},
+            {request_timeout, RequestTimeout},
             {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}]
         end,
 
-    {ok, Client} = greptimedb:start_client(Options(3_000)),
+    {ok, Client} = greptimedb:start_client(Options(10_000)),
     try
         ok = wait_alive(Client),
-        %% The second start does not reconfigure the running workers, so the
-        %% client it hands back must not claim the new timeouts either.
-        {error, {already_started, Reused}} = greptimedb:start_client(Options(100)),
-        ?assertEqual(maps:get(timeouts, Client), maps:get(timeouts, Reused)),
-        ?assert(greptimedb:is_alive(Reused))
+        %% Reusing a pool does not reconfigure its workers, but every request
+        %% carries its own deadline. A 1 ms client times out on its own writes
+        %% without shortening anyone else's, and its caller cannot give up
+        %% before the deadline it set.
+        {error, {already_started, Impatient}} = greptimedb:start_client(Options(1)),
+        ?assertMatch({ok, _}, greptimedb:write(Client, Metric, points(1))),
+        ?assertMatch({error, _}, greptimedb:write(Impatient, Metric, points(1))),
+        ?assertMatch({ok, _}, greptimedb:write(Client, Metric, points(1)))
     after
         greptimedb:stop_client(Client)
     end,

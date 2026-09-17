@@ -46,11 +46,16 @@ write_request(Stream, Request) ->
 %% `request_timeout' so the gRPC deadline error surfaces first.
 -spec finish(Stream :: map()) -> {ok, term()} | {error, term(), term()} | timeout | stream_finished.
 finish(Stream) ->
-    Timeouts = greptimedb_worker:timeouts(maps:get(cli_opts, Stream, [])),
-    finish(Stream, greptimedb_worker:caller_timeout(request_timeout, Timeouts)).
+    #{request_timeout := Timeout} = stream_timeouts(Stream),
+    finish(Stream, greptimedb_worker:caller_timeout(Timeout)).
 
 %% @doc Finish the gRPC stream and wait the result with timeout in milliseconds.
 -spec finish(Stream :: map(), Timeout :: integer()) -> {ok, term()} | {error, term(), term()} | timeout | stream_finished.
+stream_timeouts(#{timeouts := Timeouts}) ->
+    Timeouts;
+stream_timeouts(Stream) ->
+    greptimedb_worker:timeouts(maps:get(cli_opts, Stream, [])).
+
 finish(Stream, Timeout) ->
     try
         ok = grpcbox_client:close_send(Stream),

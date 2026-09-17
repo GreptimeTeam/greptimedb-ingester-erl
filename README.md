@@ -221,6 +221,12 @@ Available client options:
     * `merge_mode`: `<<"last_row">>` or `<<"last_non_null">>` (default `<<"last_row">>`)
     * `auto_create_table`: `<<"true">>` or `<<"false">>` (default `<<"true">>`)
     * More about [table options](https://docs.greptime.com/reference/sql/create/#table-options)
+`request_timeout` and `health_check_timeout` are sent with each request, so they
+apply to the client that made it. `connect_timeout` and `tcp_user_timeout` belong
+to the connection and are fixed when the pool starts: a client that reuses a
+running pool, which `start_client/1` reports as `{error, {already_started, Client}}`,
+keeps the values that pool was started with.
+
 * **`connect_timeout`**: Milliseconds to wait for the TCP connection to an endpoint (default `5000`)
 * **`request_timeout`**: gRPC deadline in milliseconds for writes, including streaming writes and the requests buffered by `async_write` (default `10000`)
 * **`health_check_timeout`**: gRPC deadline in milliseconds for `is_alive` (default `10000`)
