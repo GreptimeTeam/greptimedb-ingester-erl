@@ -174,8 +174,8 @@ rpc_write_stream(#{pool := Pool, cli_opts := Options} = Client) ->
     Fun = fun(Worker) ->
              case greptimedb_worker:stream(Worker, Timeouts) of
                  {ok, S} ->
-                     %% finish/1 waits on the deadline set here, so it reads the
-                     %% same resolved timeouts rather than re-deriving its own.
+                     %% finish/1 waits on the deadline set here, so give it the
+                     %% same timeouts.
                      {ok, S#{cli_opts => Options, timeouts => Timeouts}};
                  Other ->
                      Other
@@ -193,7 +193,6 @@ timeouts(#{timeouts := Timeouts}) ->
     Timeouts;
 timeouts(#{cli_opts := Options}) ->
     greptimedb_worker:timeouts(Options).
-
 
 maybe_return_reason({error, Reason}, true) ->
     {false, Reason};

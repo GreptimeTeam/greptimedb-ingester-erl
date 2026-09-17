@@ -38,6 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   groups requests sharing a deadline. They used to be read separately by the
   caller and by the worker, which disagreed whenever a pool was started a
   second time with different options.
+- `request_timeout` now bounds an async write end to end. A queued request was
+  given a fresh full timeout when its batch started, so it could be sent after
+  the deadline its caller asked for, and one that expired behind a live entry
+  stayed queued instead of failing with `{error, timeout}`.
 - `grpc_hints` are now sent on streaming writes. `write_stream/1` built its
   context without the hint header, so table options such as `ttl` and
   `append_mode` were silently dropped on tables created through a stream.

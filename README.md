@@ -228,7 +228,8 @@ running pool, which `start_client/1` reports as `{error, {already_started, Clien
 keeps the values that pool was started with.
 
 * **`connect_timeout`**: Milliseconds to wait for the TCP connection to an endpoint (default `5000`)
-* **`request_timeout`**: gRPC deadline in milliseconds for writes, including streaming writes and the requests buffered by `async_write` (default `10000`)
+* **`request_timeout`**: Milliseconds a write may take, including streaming writes and
+  `async_write`, where time spent waiting in the batching queue counts against it (default `10000`)
 * **`health_check_timeout`**: gRPC deadline in milliseconds for `is_alive` (default `10000`)
 * **`tcp_user_timeout`**: Milliseconds unacknowledged data may stay outstanding before the
   kernel drops the connection, set as `TCP_USER_TIMEOUT` on the socket (default `0`, disabled).

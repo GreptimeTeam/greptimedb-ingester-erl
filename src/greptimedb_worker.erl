@@ -31,8 +31,7 @@
                       health_check_timeout := pos_integer(),
                       tcp_user_timeout := non_neg_integer()}.
 
-%% No timeout lives here: every request carries the deadline its caller asked
-%% for, which is what keeps a caller's wait and the gRPC deadline in step.
+%% No timeout here: every request carries its caller's deadline.
 -record(state, {channel, requests, hints}).
 
 -ifdef(TEST).
@@ -95,9 +94,8 @@ init(Args) ->
     {ok, #state{channel = Channel, hints = Hints,
                 requests = #{ pending => queue:new(), pending_count => 0}}}.
 
-%% Synchronous requests carry their own deadline: the caller waits past it, and
-%% deriving both from the same value is what keeps the two in step even when a
-%% pool is shared by clients started with different options.
+%% The deadline comes with the request, so the caller's wait and this one cannot
+%% drift apart.
 handle_call({handle, Request, Timeout}, _From,
             #state{channel = Channel, hints = Hints} = State) ->
     Ctx = new_ctx(Timeout, Hints),
@@ -285,16 +283,17 @@ do_shoot(State, _Force) ->
     State.
 
 do_shoot(#state{hints = Hints} = State0, Requests0, Pending0, N, Channel) ->
-    %% The batch runs on the deadline of the request that opens it; shoot/4 only
-    %% adds requests asking for the same one.
-    {{value, ?PEND_REQ(ReplyTo, ?REQ(_, _, Timeout) = Req)}, Pending} = queue:out(Pending0),
+    {{value, ?PEND_REQ(ReplyTo, ?REQ(_, ExpireAt, Timeout) = Req)}, Pending} = queue:out(Pending0),
     Requests = Requests0#{pending := Pending, pending_count := N - 1},
     State1 = State0#state{requests = Requests},
-    Ctx = new_ctx(Timeout, Hints),
+    %% Queueing time counts against the deadline. The opening request has the
+    %% least left of the batch, so the whole batch runs on its remainder.
+    Deadline = remaining(ExpireAt, Timeout),
+    Ctx = new_ctx(Deadline, Hints),
     try
         case greptime_v_1_greptime_database_client:handle_requests(Ctx, #{channel => Channel}) of
             {ok, Stream} ->
-                shoot(Stream, Req, State1, [ReplyTo]);
+                shoot(Stream, Req, {Timeout, Deadline}, State1, [ReplyTo]);
             Error ->
                 reply(ReplyTo, Error),
                 State1
@@ -307,14 +306,14 @@ do_shoot(#state{hints = Hints} = State0, Requests0, Pending0, N, Channel) ->
             State1
     end.
 
-shoot(Stream, ?REQ(Req, _, Timeout), State0, ReplyToList) ->
+shoot(Stream, ?REQ(Req, _, _), {Timeout, Deadline} = Batch, State0, ReplyToList) ->
     case greptimedb_stream:write_request(Stream, Req) of
         ok ->
             case take_next(Timeout, State0) of
                 {ok, ReplyTo, NextReq, State1} ->
-                    shoot(Stream, NextReq, State1, [ReplyTo | ReplyToList]);
-                none ->
-                    finish_batch(Stream, Timeout, State0, ReplyToList)
+                    shoot(Stream, NextReq, Batch, State1, [ReplyTo | ReplyToList]);
+                {none, State1} ->
+                    finish_batch(Stream, Deadline, State1, ReplyToList)
             end;
         Error ->
             lists:foreach(fun(ReplyTo) ->
@@ -323,24 +322,44 @@ shoot(Stream, ?REQ(Req, _, Timeout), State0, ReplyToList) ->
             State0
     end.
 
-%% Only requests sharing the batch's deadline can join it: they all ride on the
-%% one context opened for the stream.
+%% Only requests sharing the batch's timeout can join it: one context covers the
+%% whole stream. Per-request deadlines leave the queue unordered by expiry, so
+%% expired entries sit behind live ones and are dropped here.
 take_next(Timeout,
           #state{requests = #{pending := Pending0, pending_count := N} = Requests0} = State)
   when N > 0 ->
     case queue:peek(Pending0) of
-        {value, ?PEND_REQ(ReplyTo, ?REQ(_, _, Timeout) = NextReq)} ->
-            {_, Pending} = queue:out(Pending0),
-            Requests = Requests0#{pending := Pending, pending_count := N - 1},
-            {ok, ReplyTo, NextReq, State#state{requests = Requests}};
-        _ ->
-            none
+        {value, ?PEND_REQ(ReplyTo, ?REQ(_, ExpireAt, ReqTimeout) = NextReq)} ->
+            State1 = State#state{requests = drop_head(Requests0, Pending0, N)},
+            case {expired(ExpireAt), ReqTimeout} of
+                {true, _} ->
+                    ok = maybe_reply_timeout(ReplyTo),
+                    take_next(Timeout, State1);
+                {false, Timeout} ->
+                    {ok, ReplyTo, NextReq, State1};
+                {false, _Other} ->
+                    {none, State}
+            end;
+        empty ->
+            {none, State}
     end;
-take_next(_Timeout, _State) ->
-    none.
+take_next(_Timeout, State) ->
+    {none, State}.
 
-finish_batch(Stream, Timeout, State, ReplyToList) ->
-    Result = case greptimedb_stream:finish(Stream, caller_timeout(Timeout)) of
+drop_head(Requests, Pending, N) ->
+    {_, Rest} = queue:out(Pending),
+    Requests#{pending := Rest, pending_count := N - 1}.
+
+remaining(ExpireAt, _Timeout) when is_integer(ExpireAt) ->
+    max(ExpireAt - now_(), 0);
+remaining(_ExpireAt, Timeout) ->
+    Timeout.
+
+expired(ExpireAt) ->
+    is_integer(ExpireAt) andalso now_() > ExpireAt.
+
+finish_batch(Stream, Deadline, State, ReplyToList) ->
+    Result = case greptimedb_stream:finish(Stream, caller_timeout(Deadline)) of
                  {ok, Resp} ->
                      {ok, Resp};
                  {error, {?GRPC_STATUS_UNAUTHENTICATED, Msg}, Other} ->
@@ -434,6 +453,40 @@ timeouts_test() ->
                  timeouts([{grpc_opts, #{connect_timeout => 2_000}}])),
     ?assertMatch(#{connect_timeout := 1_000},
                  timeouts([{connect_timeout, 1_000}, {grpc_opts, #{connect_timeout => 2_000}}])).
+
+remaining_test() ->
+    Now = now_(),
+    %% queueing time is spent, not given back
+    ?assert(remaining(Now + 5_000, 10_000) =< 5_000),
+    ?assert(remaining(Now + 5_000, 10_000) > 4_000),
+    ?assertEqual(0, remaining(Now - 1, 10_000)),
+    ?assertEqual(10_000, remaining(undefined, 10_000)).
+
+take_next_skips_expired_test() ->
+    Now = now_(),
+    Self = self(),
+    Expired = ?PEND_REQ({fun(Result) -> Self ! {expired_reply, Result} end, []},
+                        ?REQ(expired_req, Now - 1, 10_000)),
+    Live = ?PEND_REQ(live_reply_to, ?REQ(live_req, Now + 10_000, 10_000)),
+    State = #state{requests = #{pending => queue:from_list([Expired, Live]),
+                                pending_count => 2}},
+
+    %% an expired entry behind a live one is dropped, not sent
+    {ok, live_reply_to, ?REQ(live_req, _, _), State1} = take_next(10_000, State),
+    ?assertEqual(#{pending => queue:new(), pending_count => 0},
+                 State1#state.requests),
+    receive
+        {expired_reply, Result} ->
+            ?assertEqual({error, timeout}, Result)
+    after 0 ->
+        error(expired_request_not_replied)
+    end.
+
+take_next_leaves_other_timeouts_test() ->
+    Now = now_(),
+    Other = ?PEND_REQ(other_reply_to, ?REQ(other_req, Now + 10_000, 3_000)),
+    State = #state{requests = #{pending => queue:from_list([Other]), pending_count => 1}},
+    ?assertMatch({none, State}, take_next(10_000, State)).
 
 prioritise_latest_test() ->
     Opts = #{prioritise_latest => true},
