@@ -29,7 +29,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   precedence.
 - `is_alive/1` no longer reports a `gen_server` timeout in place of the real gRPC
   error. The caller and the gRPC deadline were both 1000 ms, so the caller always
-  gave up first; callers now wait 2000 ms beyond the deadline.
+  gave up first. Every caller now waits 2000 ms beyond the deadline it set,
+  `greptimedb_stream:finish/1` included.
 - Recover a stale gRPC channel left behind when a pool worker terminates before
   its channel is stopped (#58).
 
