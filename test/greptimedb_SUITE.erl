@@ -24,6 +24,7 @@ all() ->
      t_bench_perf,
      t_write_stream,
      t_async_write_batch,
+     t_async_batch_after_health_check,
      t_write_greptime_cloud,
      t_auth_error,
      t_insert_requests,
@@ -835,6 +836,44 @@ t_async_write_batch(_) ->
 
     greptimedb:stop_client(Client),
     ok.
+
+t_async_batch_after_health_check(_) ->
+    Pool = async_health_check_pool,
+    Options =
+        [{endpoints, [{http, greptime_host(), 4001}]},
+         {pool, Pool},
+         {pool_size, 1},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+    {ok, Client} = greptimedb:start_client(Options),
+    try
+        wait_alive(Client),
+        ok = ecpool:with_client(Pool,
+          fun(Worker) ->
+              Ref = make_ref(),
+              Self = self(),
+              Callback = {fun(Result) -> Self ! {Ref, Result} end, []},
+              Request = greptimedb_encoder:insert_requests(
+                          Client, [{<<"async_health_check">>, points(1)}]),
+              Timeouts = greptimedb_worker:timeouts(Options),
+              ok = sys:suspend(Worker),
+              HealthRequest = try
+                  ok = greptimedb_worker:async_handle(Worker, Request, Callback, Timeouts),
+                  %% Queue the call before the worker can start its linger timer.
+                  gen_server:send_request(Worker, {health_check, 5_000})
+              after
+                  ok = sys:resume(Worker)
+              end,
+              ?assertMatch({reply, {ok, _}}, gen_server:receive_response(HealthRequest, 10_000)),
+              receive
+                  {Ref, Result} ->
+                      ?assertMatch({ok, #{response := {affected_rows, #{value := 1}}}}, Result)
+              after 5_000 ->
+                  error(async_batch_not_flushed)
+              end
+          end)
+    after
+        ok = greptimedb:stop_client(Client)
+    end.
 
 t_write_greptime_cloud(_) ->
     Host = os:getenv("GT_TEST_HOST"),

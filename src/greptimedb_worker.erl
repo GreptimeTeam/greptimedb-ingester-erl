@@ -31,8 +31,7 @@
                       health_check_timeout := pos_integer(),
                       tcp_user_timeout := non_neg_integer()}.
 
-%% No timeout here: every request carries its caller's deadline.
--record(state, {channel, requests, hints}).
+-record(state, {channel, requests, hints, batch_timer = undefined}).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -127,17 +126,19 @@ handle_call(channel, _From, #state{channel = Channel, hints = Hints} = State) ->
 handle_info(?ASYNC_REQ(Request, ExpireAt, Timeout, ResultCallback), State0) ->
     Req = ?REQ(Request, ExpireAt, Timeout),
     State1 = enqueue_req(ResultCallback, Req, State0),
-    State = maybe_shoot(State1, false),
-    noreply_state(State);
+    State = update_batch_timer(maybe_shoot(State1, false)),
+    {noreply, State};
 
-handle_info(timeout, State0) ->
-    State = maybe_shoot(State0, true),
-    noreply_state(State);
+handle_info({timeout, TRef, flush_batch}, #state{batch_timer = TRef} = State0) ->
+    State1 = maybe_shoot(State0#state{batch_timer = undefined}, true),
+    {noreply, update_batch_timer(State1)};
+handle_info({timeout, _TRef, flush_batch}, State) ->
+    {noreply, State};
 
 handle_info(Info, State) ->
     logger:debug("~p unexpected_info: ~p, channel: ~p", [?MODULE, Info, State#state.channel]),
 
-    {noreply, State, ?ASYNC_BATCH_LINGER}.
+    {noreply, State}.
 
 
 start_link(Args) ->
@@ -246,11 +247,21 @@ reply({F, A}, Result) when is_function(F) ->
 reply(From, Result) ->
     gen_server:reply(From, Result).
 
-noreply_state(#state{requests = #{pending_count := N}} = State) when N > 0 ->
-    {noreply, State, ?ASYNC_BATCH_LINGER};
+update_batch_timer(#state{requests = #{pending_count := 0}} = State) ->
+    cancel_batch_timer(State);
+update_batch_timer(#state{requests = #{pending_count := N}} = State) when N > 0 ->
+    start_batch_timer(State).
 
-noreply_state(State) ->
-    {noreply, State}.
+start_batch_timer(State0) ->
+    State = cancel_batch_timer(State0),
+    TRef = erlang:start_timer(?ASYNC_BATCH_LINGER, self(), flush_batch),
+    State#state{batch_timer = TRef}.
+
+cancel_batch_timer(#state{batch_timer = TRef} = State) when is_reference(TRef) ->
+    _ = erlang:cancel_timer(TRef),
+    State#state{batch_timer = undefined};
+cancel_batch_timer(State) ->
+    State.
 
 
 %%%===================================================================
@@ -439,6 +450,26 @@ connect(Options) ->
 %%% Tests
 %%%===================================================================
 -ifdef(TEST).
+
+batch_timer_lifecycle_test() ->
+    Empty = #{pending => queue:new(), pending_count => 0},
+    State0 = #state{requests = Empty},
+    Msg = ?ASYNC_REQ(request, now_() + 10_000, 10_000, {fun(_) -> ok end, []}),
+    {noreply, State1} = handle_info(Msg, State0),
+    TRef = State1#state.batch_timer,
+    ?assert(is_reference(TRef)),
+    {noreply, State2} = handle_info(Msg, State1),
+    TRef2 = State2#state.batch_timer,
+    ?assertNotEqual(TRef, TRef2),
+    ?assertEqual(false, erlang:read_timer(TRef)),
+    ?assertEqual({noreply, State2}, handle_info({timeout, TRef, flush_batch}, State2)),
+    State3 = update_batch_timer(State2#state{requests = Empty}),
+    ?assertEqual(false, erlang:read_timer(TRef2)),
+    ?assertEqual(undefined, State3#state.batch_timer),
+    {noreply, State4} = handle_info(Msg, State3),
+    ?assertEqual({noreply, State4}, handle_info({timeout, TRef2, flush_batch}, State4)),
+    _ = cancel_batch_timer(State4),
+    ok.
 
 timeouts_test() ->
     ?assertEqual(#{connect_timeout => ?DEFAULT_CONNECT_TIMEOUT,
