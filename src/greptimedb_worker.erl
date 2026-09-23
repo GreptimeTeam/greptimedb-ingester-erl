@@ -252,11 +252,10 @@ update_batch_timer(#state{requests = #{pending_count := 0}} = State) ->
 update_batch_timer(#state{requests = #{pending_count := N}} = State) when N > 0 ->
     start_batch_timer(State).
 
-start_batch_timer(#state{batch_timer = undefined} = State) ->
+start_batch_timer(State0) ->
+    State = cancel_batch_timer(State0),
     TRef = erlang:start_timer(?ASYNC_BATCH_LINGER, self(), flush_batch),
-    State#state{batch_timer = TRef};
-start_batch_timer(State) ->
-    State.
+    State#state{batch_timer = TRef}.
 
 cancel_batch_timer(#state{batch_timer = TRef} = State) when is_reference(TRef) ->
     _ = erlang:cancel_timer(TRef),
@@ -460,13 +459,15 @@ batch_timer_lifecycle_test() ->
     TRef = State1#state.batch_timer,
     ?assert(is_reference(TRef)),
     {noreply, State2} = handle_info(Msg, State1),
-    ?assertEqual(TRef, State2#state.batch_timer),
-    ?assertEqual({noreply, State2}, handle_info({timeout, make_ref(), flush_batch}, State2)),
-    State3 = update_batch_timer(State2#state{requests = Empty}),
+    TRef2 = State2#state.batch_timer,
+    ?assertNotEqual(TRef, TRef2),
     ?assertEqual(false, erlang:read_timer(TRef)),
+    ?assertEqual({noreply, State2}, handle_info({timeout, TRef, flush_batch}, State2)),
+    State3 = update_batch_timer(State2#state{requests = Empty}),
+    ?assertEqual(false, erlang:read_timer(TRef2)),
     ?assertEqual(undefined, State3#state.batch_timer),
     {noreply, State4} = handle_info(Msg, State3),
-    ?assertEqual({noreply, State4}, handle_info({timeout, TRef, flush_batch}, State4)),
+    ?assertEqual({noreply, State4}, handle_info({timeout, TRef2, flush_batch}, State4)),
     _ = cancel_batch_timer(State4),
     ok.
 
