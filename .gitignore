@@ -18,3 +18,6 @@ _build
 rebar3.crashdump
 *~
 sys.config
+src/stress_test.erl
+encoder_benchmark.erl
+simple_benchmark.erl

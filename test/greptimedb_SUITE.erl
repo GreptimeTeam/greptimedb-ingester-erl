@@ -13,13 +13,18 @@
 -define(WRONG_PASSWORD, <<"wrong_pwd">>).
 
 all() ->
-    [t_write,
+    [t_recover_stale_channel,
+     t_write,
      t_write_stream,
+     t_write_stream_hints,
+     t_request_timeout_reaches_the_rpc,
+     t_async_finish_wait_excludes_stream_setup,
      t_write_failure,
      t_write_batch,
      t_bench_perf,
      t_write_stream,
      t_async_write_batch,
+     t_async_batch_after_health_check,
      t_write_greptime_cloud,
      t_auth_error,
      t_insert_requests,
@@ -38,6 +43,29 @@ all() ->
      t_write_sparse_and_non_sparse,
      t_write_custom_ts_column,
      t_write_decimal128].
+
+t_recover_stale_channel(_) ->
+    Pool = greptimedb_stale_channel_pool,
+    Channel = <<"greptimedb_stale_channel_pool:1">>,
+    Endpoint = {http, greptime_host(), 5001},
+    GrpcOptions = #{connect_timeout => 5_000},
+    Options =
+        [{endpoints, [Endpoint]},
+         {pool, Pool},
+         {pool_size, 1},
+         {grpc_opts, GrpcOptions}],
+    try
+        {Scheme, Host, Port} = Endpoint,
+        {ok, StaleChannel} =
+            grpcbox_channel_sup:start_child(
+              Channel, [{Scheme, Host, Port, []}], GrpcOptions),
+        {ok, Client} = greptimedb:start_client(Options),
+        ?assertNot(is_process_alive(StaleChannel)),
+        ok = greptimedb:stop_client(Client)
+    after
+        _ = catch ecpool:stop_sup_pool(Pool),
+        _ = catch grpcbox_channel:stop(Channel)
+    end.
 
 %%[t_bench_perf].
 %%[t_insert_requests, t_bench_perf].
@@ -458,6 +486,116 @@ t_write_stream(_) ->
     greptimedb:stop_client(Client),
     ok.
 
+t_async_finish_wait_excludes_stream_setup(_) ->
+    Metric = <<"async_finish_budget">>,
+    drop_table(Metric),
+    Self = self(),
+    SetupDelay = 1_000,
+    RequestTimeout = 3_000,
+    Options =
+        [{endpoints, [{http, greptime_host(), 4001}]},
+         {pool, greptimedb_finish_budget_pool},
+         {pool_size, 1},
+         {request_timeout, RequestTimeout},
+         {grpc_opts,
+          #{stream_interceptor =>
+                #{new_stream =>
+                      fun(Ctx, Channel, Path, Def, NewStream, Opts) ->
+                         timer:sleep(SetupDelay),
+                         NewStream(Ctx, Channel, Path, Def, Opts)
+                      end,
+                  send_msg => fun(Stream, SendMsg, Input) -> SendMsg(Stream, Input) end,
+                  recv_msg =>
+                      fun(Stream, RecvMsg, Timeout) ->
+                         Self ! {finish_wait, Timeout},
+                         RecvMsg(Stream, Timeout)
+                      end}}},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    try
+        ok = wait_alive(Client),
+        ok = await_async_write(Client, Metric),
+        Wait =
+            receive
+                {finish_wait, W} ->
+                    W
+            after 15_000 ->
+                error(no_finish_wait_reported)
+            end,
+        %% Opening the stream spent part of the budget the context runs on, so
+        %% the receive waits on what is left of it, not on the whole timeout.
+        Expected = RequestTimeout - SetupDelay + 2_000,
+        ?assert(Wait =< Expected),
+        ?assert(Wait > Expected - 500)
+    after
+        greptimedb:stop_client(Client)
+    end,
+    ok.
+
+t_request_timeout_reaches_the_rpc(_) ->
+    Metric = <<"request_timeout_deadlines">>,
+    drop_table(Metric),
+    Options =
+        fun(RequestTimeout) ->
+           [{endpoints, [{http, greptime_host(), 4001}]},
+            {pool, greptimedb_deadline_pool},
+            {pool_size, 1},
+            {request_timeout, RequestTimeout},
+            {grpc_opts, deadline_reporting_interceptors(self())},
+            {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}]
+        end,
+
+    {ok, Client} = greptimedb:start_client(Options(5_000)),
+    try
+        ok = wait_alive(Client),
+        flush_deadlines(),
+
+        {ok, _} = greptimedb:write(Client, Metric, points(1)),
+        assert_deadline(5_000, recv_deadline(unary)),
+        ok = await_async_write(Client, Metric),
+        assert_deadline(5_000, recv_deadline(stream)),
+
+        %% Reusing the pool does not reconfigure its workers, but every request
+        %% carries the deadline its own caller asked for.
+        {error, {already_started, Impatient}} = greptimedb:start_client(Options(1_000)),
+        {ok, _} = greptimedb:write(Impatient, Metric, points(1)),
+        assert_deadline(1_000, recv_deadline(unary)),
+        ok = await_async_write(Impatient, Metric),
+        assert_deadline(1_000, recv_deadline(stream)),
+
+        %% and leaves the deadline of the client that started the pool alone
+        {ok, _} = greptimedb:write(Client, Metric, points(1)),
+        assert_deadline(5_000, recv_deadline(unary))
+    after
+        greptimedb:stop_client(Client)
+    end,
+    ok.
+
+t_write_stream_hints(_) ->
+    Metric = <<"temperatures_stream_hints">>,
+    drop_table(Metric),
+    Options =
+        [{endpoints, [{http, greptime_host(), 4001}]},
+         {pool, greptimedb_stream_hints_pool},
+         {pool_size, 1},
+         {grpc_hints, #{<<"append_mode">> => <<"true">>, <<"ttl">> => <<"7 days">>}},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+
+    {ok, Client} = greptimedb:start_client(Options),
+    ok = wait_alive(Client),
+    {ok, Stream} = greptimedb:write_stream(Client),
+    ok = greptimedb_stream:write(Stream, Metric, points(1)),
+    {ok, #{response := {affected_rows, #{value := 1}}}} = greptimedb_stream:finish(Stream),
+
+    %% The hints travel on the stream's own context, not the one used by write/3
+    ShowCreate = execute_sql_query("show create table temperatures_stream_hints"),
+    ?assert(string:find(ShowCreate, "ttl = '7days'") =/= nomatch),
+    ?assert(string:find(ShowCreate, "append_mode = 'true'") =/= nomatch),
+
+    greptimedb:stop_client(Client),
+    ok.
+
 t_write_batch(_) ->
     Options =
         [{endpoints, [{http, greptime_host(), 4001}]},
@@ -698,6 +836,44 @@ t_async_write_batch(_) ->
 
     greptimedb:stop_client(Client),
     ok.
+
+t_async_batch_after_health_check(_) ->
+    Pool = async_health_check_pool,
+    Options =
+        [{endpoints, [{http, greptime_host(), 4001}]},
+         {pool, Pool},
+         {pool_size, 1},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+    {ok, Client} = greptimedb:start_client(Options),
+    try
+        wait_alive(Client),
+        ecpool:with_client(Pool,
+          fun(Worker) ->
+              Ref = make_ref(),
+              Self = self(),
+              Callback = {fun(Result) -> Self ! {Ref, Result} end, []},
+              Request = greptimedb_encoder:insert_requests(
+                          Client, [{<<"async_health_check">>, points(1)}]),
+              Timeouts = greptimedb_worker:timeouts(Options),
+              ok = sys:suspend(Worker),
+              HealthRequest = try
+                  ok = greptimedb_worker:async_handle(Worker, Request, Callback, Timeouts),
+                  %% Queue the call before the worker can start its linger timer.
+                  gen_server:send_request(Worker, {health_check, 5_000})
+              after
+                  ok = sys:resume(Worker)
+              end,
+              ?assertMatch({reply, {ok, _}}, gen_server:receive_response(HealthRequest, 10_000)),
+              receive
+                  {Ref, Result} ->
+                      ?assertMatch({ok, #{response := {affected_rows, #{value := 1}}}}, Result)
+              after 5_000 ->
+                  error(async_batch_not_flushed)
+              end
+          end)
+    after
+        ok = greptimedb:stop_client(Client)
+    end.
 
 t_write_greptime_cloud(_) ->
     Host = os:getenv("GT_TEST_HOST"),
@@ -1207,6 +1383,80 @@ t_insert_requests_metric_formats(_) ->
     {value, TsSchema} =
         lists:search(fun(S) -> maps:get(column_name, S) == <<"greptime_timestamp">> end, Schema),
     ?assertEqual('TIMESTAMP_SECOND', maps:get(datatype, TsSchema)).
+
+%% Report the deadline each RPC actually carries, so a test can assert on it
+%% instead of on how long a request happens to take.
+deadline_reporting_interceptors(Pid) ->
+    Report =
+        fun(Tag, Ctx) ->
+           Pid ! {deadline, Tag, grpcbox_utils:get_timeout_from_ctx(Ctx, undefined)},
+           ok
+        end,
+    #{unary_interceptor =>
+          fun(Ctx, _Channel, Handler, _Path, Input, _Def, _Options) ->
+             Report(unary, Ctx),
+             Handler(Ctx, Input)
+          end,
+      stream_interceptor =>
+          #{new_stream =>
+                fun(Ctx, Channel, Path, Def, NewStream, Options) ->
+                   Report(stream, Ctx),
+                   NewStream(Ctx, Channel, Path, Def, Options)
+                end,
+            send_msg => fun(Stream, SendMsg, Input) -> SendMsg(Stream, Input) end,
+            recv_msg => fun(Stream, RecvMsg, Timeout) -> RecvMsg(Stream, Timeout) end}}.
+
+recv_deadline(Tag) ->
+    receive
+        {deadline, Tag, Deadline} ->
+            Deadline
+    after 10_000 ->
+        error({no_deadline_reported, Tag})
+    end.
+
+flush_deadlines() ->
+    receive
+        {deadline, _, _} ->
+            flush_deadlines()
+    after 0 ->
+        ok
+    end.
+
+%% The deadline left when the RPC starts is a hair under what was configured.
+assert_deadline(Configured, Reported) ->
+    ?assert(is_integer(Reported)),
+    ?assert(Reported =< Configured),
+    ?assert(Reported > Configured - 1_000).
+
+await_async_write(Client, Metric) ->
+    Ref = make_ref(),
+    Self = self(),
+    ok = greptimedb:async_write(Client, Metric, points(1), {fun(R) -> Self ! {Ref, R} end, []}),
+    receive
+        {Ref, {ok, _}} ->
+            ok;
+        {Ref, Other} ->
+            error({async_write_failed, Other})
+    after 15_000 ->
+        error(async_write_timeout)
+    end.
+
+%% A pool is usable a moment after start_client/1 returns: the grpcbox channel
+%% connects its endpoints from a gen_statem event, so picking one right away can
+%% still fail with no_endpoints.
+wait_alive(Client) ->
+    wait_alive(Client, 50).
+
+wait_alive(Client, 0) ->
+    error({not_alive, greptimedb:is_alive(Client, true)});
+wait_alive(Client, N) ->
+    case greptimedb:is_alive(Client) of
+        true ->
+            ok;
+        false ->
+            timer:sleep(100),
+            wait_alive(Client, N - 1)
+    end.
 
 %% Helper function to execute SQL query and return pretty-printed JSON
 execute_sql_query(Sql) ->

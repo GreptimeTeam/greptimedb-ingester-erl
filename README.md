@@ -221,6 +221,21 @@ Available client options:
     * `merge_mode`: `<<"last_row">>` or `<<"last_non_null">>` (default `<<"last_row">>`)
     * `auto_create_table`: `<<"true">>` or `<<"false">>` (default `<<"true">>`)
     * More about [table options](https://docs.greptime.com/reference/sql/create/#table-options)
+`request_timeout` and `health_check_timeout` are sent with each request, so they
+apply to the client that made it. `connect_timeout` and `tcp_user_timeout` belong
+to the connection and are fixed when the pool starts: a client that reuses a
+running pool, which `start_client/1` reports as `{error, {already_started, Client}}`,
+keeps the values that pool was started with.
+
+* **`connect_timeout`**: Milliseconds to wait for the TCP connection to an endpoint (default `5000`)
+* **`request_timeout`**: Milliseconds a write may take, including streaming writes and
+  `async_write`, where time spent waiting in the batching queue counts against it (default `10000`)
+* **`health_check_timeout`**: gRPC deadline in milliseconds for `is_alive` (default `10000`)
+* **`tcp_user_timeout`**: Milliseconds unacknowledged data may stay outstanding before the
+  kernel drops the connection, set as `TCP_USER_TIMEOUT` on the socket (default `0`, disabled).
+  The client sends no TCP keepalive and no HTTP/2 ping, so without this a silently broken
+  connection stays in the pool and every request on it has to exhaust `request_timeout`.
+  Linux only, ignored on other platforms.
 * **`ssl_opts`**: SSL options for HTTPS endpoints (default `[]`)
 * **`auth`**: Authentication options (see [Authentication](#authentication))
 * **`timeunit`**: Default timestamp unit:
@@ -242,6 +257,10 @@ Options = [
     {timeunit, ms},
     {dbname, <<"my_database">>},
     {ts_column, <<"event_time">>},
+    {connect_timeout, 5000},
+    {request_timeout, 10000},
+    {health_check_timeout, 10000},
+    {tcp_user_timeout, 30000},
     {grpc_hints, #{
         <<"append_mode">> => <<"true">>,
         <<"ttl">> => <<"30 days">>,
