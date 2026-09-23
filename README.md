@@ -1,7 +1,7 @@
 # GreptimeDB Erlang Client
 
-![Tests](https://github.com/GreptimeTeam/greptimedb-client-erl/workflows/Erlang%20CI/badge.svg)
-[![Coverage Status](https://coveralls.io/repos/github/GreptimeTeam/greptimedb-client-erl/badge.svg?branch=main)](https://coveralls.io/github/GreptimeTeam/greptimedb-client-erl?branch=main)
+![Tests](https://github.com/GreptimeTeam/greptimedb-ingester-erl/workflows/Erlang%20CI/badge.svg)
+[![Coverage Status](https://coveralls.io/repos/github/GreptimeTeam/greptimedb-ingester-erl/badge.svg?branch=main)](https://coveralls.io/github/GreptimeTeam/greptimedb-ingester-erl?branch=main)
 
 An Erlang client library for [GreptimeDB](https://github.com/GreptimeTeam/greptimedb).
 
@@ -18,7 +18,6 @@ An Erlang client library for [GreptimeDB](https://github.com/GreptimeTeam/grepti
 - [Connection Options](#connection-options)
   - [Client Options](#client-options)
   - [Authentication](#authentication)
-  - [GreptimeCloud](#greptimecloud)
 - [Data Types](#data-types)
 - [Development](#development)
   - [Build](#build)
@@ -149,14 +148,10 @@ SELECT event_time, temperature, sensor_id FROM sensors ORDER BY event_time;
 
 ### Batch Write
 
-Write multiple metrics in a single request:
+Write multiple metrics in a single request, using `Points` from the basic write example:
 
 ```erlang
-Metric1 = <<"temperatures">>,
-Points1 = [...],
-Metric2 = <<"humidities">>,
-Points2 = [...],
-Batch = [{Metric1, Points1}, {Metric2, Points2}],
+Batch = [{<<"temperatures_a">>, Points}, {<<"temperatures_b">>, Points}],
 
 {ok, _} = greptimedb:write_batch(Client, Batch).
 ```
@@ -177,10 +172,10 @@ receive
 end.
 ```
 
-Batch async write:
+Batch async write, using `Points` from the basic write example:
 
 ```erlang
-Batch = [...],
+Batch = [{<<"temperatures_a">>, Points}, {<<"temperatures_b">>, Points}],
 Ref = make_ref(),
 Pid = self(),
 ResultCallback = {fun(Reply) -> Pid ! {{Ref, reply}, Reply} end, []},
@@ -194,17 +189,25 @@ end.
 
 ### Streaming Write
 
-For high-throughput scenarios:
+Write multiple requests through one stream, using `Points` from the basic write example:
 
 ```erlang
-Points1 = [...],
-Points2 = [...],
-
 {ok, Stream} = greptimedb:write_stream(Client),
-greptimedb_stream:write(Stream, "Metric1", Points1),
-greptimedb_stream:write(Stream, "Metric2", Points2),
+ok = greptimedb_stream:write(Stream, <<"temperatures_a">>, Points),
+ok = greptimedb_stream:write(Stream, <<"temperatures_b">>, Points),
 {ok, _} = greptimedb_stream:finish(Stream).
 ```
+
+`request_timeout` sets the gRPC deadline when the stream opens. `finish/1`
+waits up to `request_timeout + 2000` milliseconds for the result. To set a
+separate wait timeout, use `finish/2` instead of `finish/1`:
+
+```erlang
+{ok, _} = greptimedb_stream:finish(Stream, 5000).
+```
+
+The wait timeout does not extend the stream's gRPC deadline. `grpc_hints` also
+apply to tables created through streaming writes.
 
 ## Connection Options
 
@@ -221,21 +224,14 @@ Available client options:
     * `merge_mode`: `<<"last_row">>` or `<<"last_non_null">>` (default `<<"last_row">>`)
     * `auto_create_table`: `<<"true">>` or `<<"false">>` (default `<<"true">>`)
     * More about [table options](https://docs.greptime.com/reference/sql/create/#table-options)
-`request_timeout` and `health_check_timeout` are sent with each request, so they
-apply to the client that made it. `connect_timeout` and `tcp_user_timeout` belong
-to the connection and are fixed when the pool starts: a client that reuses a
-running pool, which `start_client/1` reports as `{error, {already_started, Client}}`,
-keeps the values that pool was started with.
-
 * **`connect_timeout`**: Milliseconds to wait for the TCP connection to an endpoint (default `5000`)
 * **`request_timeout`**: Milliseconds a write may take, including streaming writes and
   `async_write`, where time spent waiting in the batching queue counts against it (default `10000`)
 * **`health_check_timeout`**: gRPC deadline in milliseconds for `is_alive` (default `10000`)
 * **`tcp_user_timeout`**: Milliseconds unacknowledged data may stay outstanding before the
   kernel drops the connection, set as `TCP_USER_TIMEOUT` on the socket (default `0`, disabled).
-  The client sends no TCP keepalive and no HTTP/2 ping, so without this a silently broken
-  connection stays in the pool and every request on it has to exhaust `request_timeout`.
-  Linux only, ignored on other platforms.
+  Supported on Linux; leave `0` on other platforms. This option does not enable
+  TCP keepalive or HTTP/2 pings.
 * **`ssl_opts`**: SSL options for HTTPS endpoints (default `[]`)
 * **`auth`**: Authentication options (see [Authentication](#authentication))
 * **`timeunit`**: Default timestamp unit:
@@ -246,7 +242,13 @@ keeps the values that pool was started with.
 * **`dbname`**: Default database name (default `<<"public">>`)
 * **`ts_column`**: Custom timestamp column name (default `<<"greptime_timestamp">>`)
 
-Example with all options:
+`request_timeout` and `health_check_timeout` are sent with each request, so they
+apply to the client that made it. `connect_timeout` and `tcp_user_timeout` belong
+to the connection and are fixed when the pool starts: a client that reuses a
+running pool, which `start_client/1` reports as `{error, {already_started, Client}}`,
+keeps the values that pool was started with.
+
+Example with connection and write options:
 
 ```erlang
 Options = [
@@ -283,40 +285,6 @@ Options = [
     {auth, {basic, #{username => <<"greptime_user">>, password => <<"greptime_pwd">>}}}
 ],
 {ok, Client} = greptimedb:start_client(Options).
-```
-
-### GreptimeCloud
-
-[GreptimeCloud](https://greptime.com/product/cloud) is a fully-managed GreptimeDB service.
-
-After creating a service, you'll need:
-* **Host**: Service hostname
-* **Port**: gRPC port (usually `5001`)
-* **Database**: Database name
-* **Username**: Service username
-* **Password**: Service password
-
-```erlang
-Host = <<"your-host.greptime.cloud">>,
-Database = <<"your_database">>,
-Username = <<"your_username">>,
-Password = <<"your_password">>,
-
-Options = [
-    {endpoints, [{https, Host, 5001}]},  % Note: https for cloud
-    {pool, greptimedb_client_pool},
-    {pool_size, 5},
-    {pool_type, random},
-    {timeunit, ms},
-    {dbname, Database},
-    {auth, {basic, #{username => Username, password => Password}}}
-],
-
-{ok, Client} = greptimedb:start_client(Options),
-
-Metric = <<"temperatures">>,
-Points = [...],
-greptimedb:write(Client, Metric, Points).
 ```
 
 ## Data Types
@@ -391,9 +359,9 @@ Start GreptimeDB:
 docker run -p 127.0.0.1:4000-4003:4000-4003 \
   -v "$(pwd)/greptimedb:/greptimedb_data" \
   --name greptime --rm \
-  greptime/greptimedb:latest standalone start \
+  greptime/greptimedb:v1.2.1 standalone start \
   --http-addr 0.0.0.0:4000 \
-  --rpc-bind-addr 0.0.0.0:4001 \
+  --grpc-bind-addr 0.0.0.0:4001 \
   --mysql-addr 0.0.0.0:4002 \
   --postgres-addr 0.0.0.0:4003 \
   --user-provider=static_user_provider:cmd:greptime_user=greptime_pwd

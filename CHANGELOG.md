@@ -6,22 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-09-23
+
 ### Added
 
 - Configurable timeouts as client options: `connect_timeout` (default `5000`),
   `request_timeout` (default `10000`) and `health_check_timeout` (default `10000`),
   all in milliseconds. `connect_timeout` and `request_timeout` keep the values that
-  were hardcoded before; the health check deadline was 1000 ms and now matches
-  `request_timeout`.
+  were hardcoded before; the default health check deadline increases from
+  1000 ms to 10000 ms.
 - `tcp_user_timeout` client option (default `0`, disabled), set as `TCP_USER_TIMEOUT`
   on the connection. The client sends neither TCP keepalive nor HTTP/2 pings, so
   a silently broken connection otherwise stays in the pool and every request on it
   has to exhaust `request_timeout`. Linux only.
 - `greptimedb_stream:finish/2` is now exported, so a caller can pass its own
-  timeout instead of the client's `request_timeout`.
+  result wait timeout without changing the stream's gRPC deadline.
 
 ### Fixed
 
+- Pending async batches still flush after health checks and other worker calls.
+  Each async enqueue resets the independent 20 ms linger timer (#56).
 - `connect_timeout` is now actually applied. It was only accepted inside
   `grpc_opts`, which grpcbox does not consult for the connect timeout, so the
   value was dropped and chatterbox fell back to its own default. The option is
@@ -35,8 +39,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `async_write` no longer runs on a deadline other than the one its caller
   asked for. `request_timeout` and `health_check_timeout` travel with each
   request, including through the async batching queue, where a batch now only
-  groups requests sharing a deadline. They used to be read separately by the
-  caller and by the worker, which disagreed whenever a pool was started a
+  groups requests with the same `request_timeout`. They used to be read separately
+  by the caller and by the worker, which disagreed whenever a pool was started a
   second time with different options.
 - `request_timeout` now bounds an async write end to end. A queued request was
   given a fresh full timeout when its batch started, so it could be sent after
