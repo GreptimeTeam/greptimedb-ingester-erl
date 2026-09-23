@@ -847,7 +847,7 @@ t_async_batch_after_health_check(_) ->
     {ok, Client} = greptimedb:start_client(Options),
     try
         wait_alive(Client),
-        ecpool:with_client(Pool,
+        ok = ecpool:with_client(Pool,
           fun(Worker) ->
               Ref = make_ref(),
               Self = self(),
