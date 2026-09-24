@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `greptimedb_values:json_value/1` for legacy `JSON` columns, taking encoded JSON text.
+- `greptimedb_values:json2_value/1` for `JSON2` columns, taking a decoded JSON term
+  (maps with binary keys, lists, binaries, numbers, `true`/`false`/`null`). JSON2 is
+  supported in fields only, and tables with a `JSON2` column must be append-only.
+
+### Changed
+
+- Synced `common.proto`, `row.proto` and `column.proto` with greptime-proto.
+
 ## [0.2.6] - 2026-09-23
 
 ### Added

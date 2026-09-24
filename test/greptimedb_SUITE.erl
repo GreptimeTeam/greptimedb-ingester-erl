@@ -42,7 +42,14 @@ all() ->
      t_insert_requests_decimal128_tag_schema_mismatch,
      t_write_sparse_and_non_sparse,
      t_write_custom_ts_column,
-     t_write_decimal128].
+     t_write_decimal128,
+     t_insert_requests_json,
+     t_json2_value_invalid,
+     t_insert_requests_json_raw_value_rejected,
+     t_insert_requests_json2_tag_rejected,
+     t_insert_requests_json_schema_mismatch,
+     t_write_json,
+     t_write_stream_json].
 
 t_recover_stale_channel(_) ->
     Pool = greptimedb_stale_channel_pool,
@@ -1336,6 +1343,186 @@ t_write_decimal128(_) ->
        jsx:decode(execute_sql_query(SQL, <<"output">>), [return_maps])),
     greptimedb:stop_client(Client),
     ok.
+
+t_insert_requests_json(_) ->
+    Point =
+        #{fields =>
+              #{<<"j1">> => greptimedb_values:json_value([<<"{\"a\":">>, <<"1}">>]),
+                <<"j2">> =>
+                    greptimedb_values:json2_value(#{<<"items">> =>
+                                                        [-(1 bsl 63), (1 bsl 64) - 1, 1.5,
+                                                         <<"s">>, null, true, #{}, []],
+                                                    <<"key">> => #{<<"ok">> => false}})},
+          tags => #{<<"host">> => <<"h1">>},
+          timestamp => 1619775142098},
+    Client = #{cli_opts => [{timeunit, ms}]},
+    Request = greptimedb_encoder:insert_requests(Client, [{"json_test", [Point]}]),
+    #{request :=
+          {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := [#{values := Values}]}}]}}} =
+        Request,
+    Column = fun(Name) ->
+                [{S, V}] = [{S, V} || {#{column_name := N} = S, V} <- lists:zip(Schema, Values), N == Name],
+                {S, V}
+             end,
+
+    {J1Schema, J1Value} = Column(<<"j1">>),
+    ?assertMatch(#{datatype := 'JSON',
+                   datatype_extension := #{type_ext := {json_type, 'JSON_BINARY'}}},
+                 J1Schema),
+    ?assertNot(maps:is_key(options, J1Schema)),
+    ?assertEqual(#{value_data => {string_value, <<"{\"a\":1}">>}}, J1Value),
+
+    {J2Schema, J2Value} = Column(<<"j2">>),
+    ?assertMatch(#{datatype := 'JSON',
+                   semantic_type := 'FIELD',
+                   datatype_extension := #{type_ext := {json_native_type, #{datatype := 'JSON'}}},
+                   options := #{options := #{<<"ARROW:extension:name">> := <<"greptime.json2">>}}},
+                 J2Schema),
+    #{value_data := {json_value, #{value := {object, #{entries := Entries}}}}} = J2Value,
+    ?assertEqual([#{key => <<"items">>,
+                    value =>
+                        #{value =>
+                              {array,
+                               #{items =>
+                                     [#{value => {int, -(1 bsl 63)}},
+                                      #{value => {uint, (1 bsl 64) - 1}},
+                                      #{value => {float, 1.5}},
+                                      #{value => {str, <<"s">>}},
+                                      #{},
+                                      #{value => {boolean, true}},
+                                      #{value => {object, #{entries => []}}},
+                                      #{value => {array, #{items => []}}}]}}}},
+                  #{key => <<"key">>,
+                    value =>
+                        #{value =>
+                              {object,
+                               #{entries =>
+                                     [#{key => <<"ok">>, value => #{value => {boolean, false}}}]}}}}],
+                 lists:sort(Entries)),
+
+    Encoded = greptimedb_database_pb:encode_msg(Request, greptime_request, [verify]),
+    ?assertMatch(#{request := {row_inserts, #{inserts := [#{rows := #{rows := [#{values := Values}]}}]}}},
+                 greptimedb_database_pb:decode_msg(Encoded, greptime_request)).
+
+t_json2_value_invalid(_) ->
+    lists:foreach(fun({Term, Reason}) ->
+                     ?assertError({invalid_json2_value, #{reason := Reason}},
+                                  greptimedb_values:json2_value(Term))
+                  end,
+                  [{null, expected_object},
+                   {[], expected_object},
+                   {<<"{}">>, expected_object},
+                   {#{<<"a">> => 1 bsl 64}, unsupported_term},
+                   {#{<<"a">> => -(1 bsl 63) - 1}, unsupported_term},
+                   {#{<<"a">> => foo}, unsupported_term},
+                   {#{<<"a">> => {1, 2}}, unsupported_term},
+                   {#{<<"a">> => [#{1 => 2}]}, invalid_key},
+                   {#{a => 1}, invalid_key}]).
+
+%% Schema fixed as JSON by point 1; a raw value in point 2 would otherwise be
+%% encoded as FLOAT64/STRING and rejected by the server.
+t_insert_requests_json_raw_value_rejected(_) ->
+    Client = #{cli_opts => [{timeunit, ms}]},
+    lists:foreach(fun(Typed) ->
+                     Points =
+                         [#{fields => #{<<"j">> => Typed}, tags => #{}, timestamp => 1},
+                          #{fields => #{<<"j">> => <<"{}">>}, tags => #{}, timestamp => 2}],
+                     ?assertError({json_requires_typed_value,
+                                   #{column := <<"j">>, value := <<"{}">>}},
+                                  greptimedb_encoder:insert_requests(Client, [{"json_raw", Points}]))
+                  end,
+                  [greptimedb_values:json_value(<<"{}">>), greptimedb_values:json2_value(#{})]).
+
+%% Schema fixed as a non-JSON type by point 1. Dropping the JSON hint of point 2
+%% would write a legacy JSON value as a plain STRING without any server error.
+t_insert_requests_json_schema_mismatch(_) ->
+    Client = #{cli_opts => [{timeunit, ms}]},
+    Json = greptimedb_values:json_value(<<"not valid JSON">>),
+    Cases =
+        [{[#{fields => #{<<"j">> => greptimedb_values:string_value(<<"s">>)}, tags => #{}, timestamp => 1},
+           #{fields => #{<<"j">> => Json}, tags => #{}, timestamp => 2}],
+          'STRING', string_value},
+         {[#{fields => #{<<"j">> => 1.0}, tags => #{}, timestamp => 1},
+           #{fields => #{<<"j">> => greptimedb_values:json2_value(#{})}, tags => #{}, timestamp => 2}],
+          'FLOAT64', json_value},
+         {[#{fields => #{<<"v">> => 1.0}, tags => #{<<"j">> => <<"s">>}, timestamp => 1},
+           #{fields => #{<<"v">> => 2.0}, tags => #{<<"j">> => Json}, timestamp => 2}],
+          'STRING', string_value}],
+    lists:foreach(fun({Points, SchemaDT, Variant}) ->
+                     ?assertError({value_schema_mismatch,
+                                   #{column := <<"j">>,
+                                     schema_datatype := SchemaDT,
+                                     value_datatype := 'JSON',
+                                     value_variant := Variant}},
+                                  greptimedb_encoder:insert_requests(Client, [{"json_mismatch", Points}]))
+                  end,
+                  Cases).
+
+t_insert_requests_json2_tag_rejected(_) ->
+    Points =
+        [#{fields => #{<<"v">> => 1.0},
+           tags => #{<<"t">> => greptimedb_values:json2_value(#{})},
+           timestamp => 1}],
+    ?assertError({json2_tag_not_supported, #{column := <<"t">>}},
+                 greptimedb_encoder:insert_requests(#{cli_opts => []}, [{"json2_tag", Points}])).
+
+t_write_json(_) ->
+    write_and_check_json(<<"table_json">>,
+                         greptimedb_client_pool_json,
+                         fun(Client, Metric, Points) -> greptimedb:write(Client, Metric, Points) end).
+
+t_write_stream_json(_) ->
+    write_and_check_json(<<"table_json_stream">>,
+                         greptimedb_stream_json_pool,
+                         fun(Client, Metric, Points) ->
+                            {ok, Stream} = greptimedb:write_stream(Client),
+                            ok = greptimedb_stream:write(Stream, Metric, Points),
+                            greptimedb_stream:finish(Stream)
+                         end).
+
+write_and_check_json(Metric, Pool, WriteFun) ->
+    drop_table(Metric),
+    Points =
+        [#{fields =>
+               #{<<"j1">> => greptimedb_values:json_value(<<"{\"a\":1,\"b\":[true,null]}">>),
+                 <<"j2">> =>
+                     greptimedb_values:json2_value(#{<<"n">> => -5,
+                                                     <<"u">> => (1 bsl 64) - 1,
+                                                     <<"f">> => 1.5,
+                                                     <<"s">> => <<"你好"/utf8>>,
+                                                     <<"arr">> => [true, null, #{}],
+                                                     <<"obj">> => #{<<"k">> => false}})},
+           tags => #{<<"host">> => <<"h1">>},
+           timestamp => 1619775142098}],
+    Options =
+        [{endpoints, [{http, greptime_host(), 4001}]},
+         {pool, Pool},
+         {pool_size, 1},
+         %% JSON2 columns require an append-only table.
+         {grpc_hints, #{<<"append_mode">> => <<"true">>}},
+         {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
+    {ok, Client} = greptimedb:start_client(Options),
+    ok = wait_alive(Client),
+    {ok, #{response := {affected_rows, #{value := 1}}}} = WriteFun(Client, Metric, Points),
+    greptimedb:stop_client(Client),
+
+    [#{<<"records">> := #{<<"rows">> := [[_, <<"CREATE TABLE", _/binary>> = Ddl]]}}] =
+        jsx:decode(execute_sql_query(<<"SHOW CREATE TABLE ", Metric/binary>>, <<"output">>),
+                   [return_maps]),
+    ?assertMatch({match, _}, re:run(Ddl, <<"\"j1\" JSON NULL">>)),
+    ?assertMatch({match, _}, re:run(Ddl, <<"\"j2\" JSON2\\(">>)),
+
+    ?assertMatch([#{<<"records">> :=
+                        #{<<"rows">> :=
+                              [[#{<<"a">> := 1, <<"b">> := [true, null]},
+                                #{<<"n">> := -5,
+                                  <<"u">> := 18446744073709551615,
+                                  <<"f">> := 1.5,
+                                  <<"s">> := <<"你好"/utf8>>,
+                                  <<"arr">> := [true, null, #{}],
+                                  <<"obj">> := #{<<"k">> := false}}]]}}],
+                 jsx:decode(execute_sql_query(<<"SELECT j1, j2 FROM ", Metric/binary>>, <<"output">>),
+                            [return_maps])).
 
 t_insert_requests_metric_formats(_) ->
     Point =

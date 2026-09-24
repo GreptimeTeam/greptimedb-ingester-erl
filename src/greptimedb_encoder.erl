@@ -18,6 +18,8 @@
 
 -define(TS_COLUMN, <<"greptime_timestamp">>).
 -define(DEFAULT_DBNAME, "greptime-public").
+-define(JSON2_EXTENSION_METADATA,
+        <<"{\"json_settings\":{\"type_hints\":[],\"max_auto_expanded_paths\":100},\"layout_version\":2}">>).
 
 %% @doc Converts a batch of data points into GreptimeDB gRPC row-based insert requests.
 %%
@@ -246,28 +248,7 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
     T2 = maps:fold(fun(Name, V, AccT) ->
                       case maps:get(Name, IndexMap, undefined) of
                           {Idx, 'FIELD', DT} ->
-                              Val = case V of
-                                        #{value_data := {decimal128_value, _}}
-                                          when DT =/= 'DECIMAL128' ->
-                                            %% Typed decimal128 into a column whose schema
-                                            %% was already fixed as a different type by an
-                                            %% earlier point — the server would reject it.
-                                            erlang:error({value_schema_mismatch,
-                                                          #{column => Name,
-                                                            schema_datatype => DT,
-                                                            value_variant => decimal128_value}});
-                                        #{value_data := VD} ->
-                                            #{value_data => VD}; % Already in row format, drop schema hints
-                                        _ when DT =:= 'DECIMAL128' ->
-                                            %% Schema was fixed as DECIMAL128 by an earlier point;
-                                            %% raw values have no precision/scale, so fail fast
-                                            %% rather than silently downgrading to FLOAT64.
-                                            erlang:error({decimal128_requires_typed_value,
-                                                          #{column => Name, value => V}});
-                                        _ ->
-                                            field_row_value(DT, V)
-                                    end,
-                              setelement(Idx, AccT, Val);
+                              setelement(Idx, AccT, row_value(Name, DT, V, fun field_row_value/2));
                           _ ->
                               AccT
                       end
@@ -279,22 +260,7 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
     T3 = maps:fold(fun(Name, V, AccT) ->
                       case maps:get(Name, IndexMap, undefined) of
                           {Idx, 'TAG', DT} ->
-                              Val = case V of
-                                        #{value_data := {decimal128_value, _}}
-                                          when DT =/= 'DECIMAL128' ->
-                                            erlang:error({value_schema_mismatch,
-                                                          #{column => Name,
-                                                            schema_datatype => DT,
-                                                            value_variant => decimal128_value}});
-                                        #{value_data := VD} ->
-                                            #{value_data => VD}; % Already in row format, drop schema hints
-                                        _ when DT =:= 'DECIMAL128' ->
-                                            erlang:error({decimal128_requires_typed_value,
-                                                          #{column => Name, value => V}});
-                                        _ ->
-                                            tag_row_value(DT, V)
-                                    end,
-                              setelement(Idx, AccT, Val);
+                              setelement(Idx, AccT, row_value(Name, DT, V, fun tag_row_value/2));
                           _ ->
                               AccT
                       end
@@ -303,6 +269,43 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
                    Tags),
 
     #{values => erlang:tuple_to_list(T3)}.
+
+%% @private
+%% @doc Converts a field or tag value to row format against the column's schema,
+%% which may have been fixed by an earlier point in the batch.
+%%
+%% DECIMAL128 and JSON values carry hints that only reach the schema, and they
+%% are dropped here. A hinted value in a column of another type would lose its
+%% type silently (a legacy JSON value is a plain `string_value' on the wire), and
+%% a raw value in a DECIMAL128 or JSON column would be converted to the default
+%% FLOAT64/STRING, so both fail fast.
+row_value(Name, DT, #{value_data := VD} = V, _RawValueFun) ->
+    case hinted_datatype(V) of
+        HintedDT when HintedDT =:= undefined; HintedDT =:= DT ->
+            #{value_data => VD};
+        HintedDT ->
+            {Variant, _} = VD,
+            erlang:error({value_schema_mismatch,
+                          #{column => Name,
+                            schema_datatype => DT,
+                            value_datatype => HintedDT,
+                            value_variant => Variant}})
+    end;
+row_value(Name, 'DECIMAL128', V, _RawValueFun) ->
+    erlang:error({decimal128_requires_typed_value, #{column => Name, value => V}});
+row_value(Name, 'JSON', V, _RawValueFun) ->
+    erlang:error({json_requires_typed_value, #{column => Name, value => V}});
+row_value(_Name, DT, V, RawValueFun) ->
+    RawValueFun(DT, V).
+
+hinted_datatype(#{value_data := {decimal128_value, _}}) ->
+    'DECIMAL128';
+hinted_datatype(#{json_type := _}) ->
+    'JSON';
+hinted_datatype(#{value_data := {json_value, _}}) ->
+    'JSON';
+hinted_datatype(_V) ->
+    undefined.
 
 %% Column info functions (for schema creation)
 
@@ -329,6 +332,10 @@ field_column_info(Name, _V) ->
       semantic_type => 'FIELD',
       datatype => 'FLOAT64'}.
 
+tag_column_info(Name, #{value_data := {json_value, _}}) ->
+    %% The server builds a JSON2 tag as a legacy JSON column and then fails to
+    %% cast the value, leaving an auto-created table with the wrong column type.
+    erlang:error({json2_tag_not_supported, #{column => Name}});
 tag_column_info(Name, V) when is_map(V) ->
     DataType = infer_datatype(V),
     Base = #{column_name => Name,
@@ -341,8 +348,8 @@ tag_column_info(Name, _V) ->
       datatype => 'STRING'}.
 
 %% @private
-%% @doc Adds `datatype_extension' to a schema entry when the value carries one.
-%% Currently only DECIMAL128 requires an extension (precision/scale).
+%% @doc Adds `datatype_extension' to a schema entry when the value's type needs
+%% one: DECIMAL128 (precision/scale), legacy JSON and JSON2.
 maybe_add_datatype_extension(Schema,
                              #{value_data := {decimal128_value, _},
                                precision := Precision,
@@ -350,6 +357,16 @@ maybe_add_datatype_extension(Schema,
     Schema#{datatype_extension =>
                 #{type_ext =>
                       {decimal_type, #{precision => Precision, scale => Scale}}}};
+maybe_add_datatype_extension(Schema, #{json_type := JsonType}) ->
+    Schema#{datatype_extension => #{type_ext => {json_type, JsonType}}};
+maybe_add_datatype_extension(Schema, #{value_data := {json_value, _}}) ->
+    %% Same column metadata as a SQL-declared JSON2 column, so that auto-created
+    %% tables get a JSON2 column.
+    Schema#{datatype_extension => #{type_ext => {json_native_type, #{datatype => 'JSON'}}},
+            options =>
+                #{options =>
+                      #{<<"ARROW:extension:name">> => <<"greptime.json2">>,
+                        <<"ARROW:extension:metadata">> => ?JSON2_EXTENSION_METADATA}}};
 maybe_add_datatype_extension(Schema, _V) ->
     Schema.
 
@@ -485,6 +502,8 @@ infer_timestamp_datatype(#{value_data := {Type, _Value}}) ->
 %%
 %% @param Value Map containing value_data
 %% @returns Datatype atom
+infer_datatype(#{json_type := _}) ->
+    'JSON';
 infer_datatype(#{value_data := {Type, _Value}}) ->
     case Type of
         i8_value ->
@@ -527,6 +546,8 @@ infer_datatype(#{value_data := {Type, _Value}}) ->
             'TIMESTAMP_SECOND';
         decimal128_value ->
             'DECIMAL128';
+        json_value ->
+            'JSON';
         _ ->
             'STRING' % Default
     end.
