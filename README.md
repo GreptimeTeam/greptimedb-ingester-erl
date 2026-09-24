@@ -384,9 +384,10 @@ Points = [
 ].
 ```
 
-Once a column is typed as `JSON` or `JSON2` in a batch, a raw value for that
-column in the same batch raises
-`{json_requires_typed_value, #{column := Name, value := Value}}`.
+Within a batch, a column's type is fixed by the first point that contains it.
+A raw value in a `JSON` or `JSON2` column raises
+`{json_requires_typed_value, #{column := Name, value := Value}}`. A JSON value
+in a column of another type raises `{value_schema_mismatch, #{column := Name, ...}}`.
 
 ## Development
 

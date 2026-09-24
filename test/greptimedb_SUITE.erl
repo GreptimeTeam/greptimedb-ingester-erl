@@ -47,6 +47,7 @@ all() ->
      t_json2_value_invalid,
      t_insert_requests_json_raw_value_rejected,
      t_insert_requests_json2_tag_rejected,
+     t_insert_requests_json_schema_mismatch,
      t_write_json].
 
 t_recover_stale_channel(_) ->
@@ -1359,8 +1360,8 @@ t_insert_requests_json(_) ->
           {row_inserts, #{inserts := [#{rows := #{schema := Schema, rows := [#{values := Values}]}}]}}} =
         Request,
     Column = fun(Name) ->
-                {value, S} = lists:search(fun(S) -> maps:get(column_name, S) == Name end, Schema),
-                {S, lists:nth(string:str(Schema, [S]), Values)}
+                [{S, V}] = [{S, V} || {#{column_name := N} = S, V} <- lists:zip(Schema, Values), N == Name],
+                {S, V}
              end,
 
     {J1Schema, J1Value} = Column(<<"j1">>),
@@ -1430,6 +1431,31 @@ t_insert_requests_json_raw_value_rejected(_) ->
                                   greptimedb_encoder:insert_requests(Client, [{"json_raw", Points}]))
                   end,
                   [greptimedb_values:json_value(<<"{}">>), greptimedb_values:json2_value(#{})]).
+
+%% Schema fixed as a non-JSON type by point 1. Dropping the JSON hint of point 2
+%% would write a legacy JSON value as a plain STRING without any server error.
+t_insert_requests_json_schema_mismatch(_) ->
+    Client = #{cli_opts => [{timeunit, ms}]},
+    Json = greptimedb_values:json_value(<<"not valid JSON">>),
+    Cases =
+        [{[#{fields => #{<<"j">> => greptimedb_values:string_value(<<"s">>)}, tags => #{}, timestamp => 1},
+           #{fields => #{<<"j">> => Json}, tags => #{}, timestamp => 2}],
+          'STRING', string_value},
+         {[#{fields => #{<<"j">> => 1.0}, tags => #{}, timestamp => 1},
+           #{fields => #{<<"j">> => greptimedb_values:json2_value(#{})}, tags => #{}, timestamp => 2}],
+          'FLOAT64', json_value},
+         {[#{fields => #{<<"v">> => 1.0}, tags => #{<<"j">> => <<"s">>}, timestamp => 1},
+           #{fields => #{<<"v">> => 2.0}, tags => #{<<"j">> => Json}, timestamp => 2}],
+          'STRING', string_value}],
+    lists:foreach(fun({Points, SchemaDT, Variant}) ->
+                     ?assertError({value_schema_mismatch,
+                                   #{column := <<"j">>,
+                                     schema_datatype := SchemaDT,
+                                     value_datatype := 'JSON',
+                                     value_variant := Variant}},
+                                  greptimedb_encoder:insert_requests(Client, [{"json_mismatch", Points}]))
+                  end,
+                  Cases).
 
 t_insert_requests_json2_tag_rejected(_) ->
     Points =

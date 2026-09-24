@@ -248,31 +248,7 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
     T2 = maps:fold(fun(Name, V, AccT) ->
                       case maps:get(Name, IndexMap, undefined) of
                           {Idx, 'FIELD', DT} ->
-                              Val = case V of
-                                        #{value_data := {decimal128_value, _}}
-                                          when DT =/= 'DECIMAL128' ->
-                                            %% Typed decimal128 into a column whose schema
-                                            %% was already fixed as a different type by an
-                                            %% earlier point — the server would reject it.
-                                            erlang:error({value_schema_mismatch,
-                                                          #{column => Name,
-                                                            schema_datatype => DT,
-                                                            value_variant => decimal128_value}});
-                                        #{value_data := VD} ->
-                                            #{value_data => VD}; % Already in row format, drop schema hints
-                                        _ when DT =:= 'DECIMAL128' ->
-                                            %% Schema was fixed as DECIMAL128 by an earlier point;
-                                            %% raw values have no precision/scale, so fail fast
-                                            %% rather than silently downgrading to FLOAT64.
-                                            erlang:error({decimal128_requires_typed_value,
-                                                          #{column => Name, value => V}});
-                                        _ when DT =:= 'JSON' ->
-                                            erlang:error({json_requires_typed_value,
-                                                          #{column => Name, value => V}});
-                                        _ ->
-                                            field_row_value(DT, V)
-                                    end,
-                              setelement(Idx, AccT, Val);
+                              setelement(Idx, AccT, row_value(Name, DT, V, fun field_row_value/2));
                           _ ->
                               AccT
                       end
@@ -284,25 +260,7 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
     T3 = maps:fold(fun(Name, V, AccT) ->
                       case maps:get(Name, IndexMap, undefined) of
                           {Idx, 'TAG', DT} ->
-                              Val = case V of
-                                        #{value_data := {decimal128_value, _}}
-                                          when DT =/= 'DECIMAL128' ->
-                                            erlang:error({value_schema_mismatch,
-                                                          #{column => Name,
-                                                            schema_datatype => DT,
-                                                            value_variant => decimal128_value}});
-                                        #{value_data := VD} ->
-                                            #{value_data => VD}; % Already in row format, drop schema hints
-                                        _ when DT =:= 'DECIMAL128' ->
-                                            erlang:error({decimal128_requires_typed_value,
-                                                          #{column => Name, value => V}});
-                                        _ when DT =:= 'JSON' ->
-                                            erlang:error({json_requires_typed_value,
-                                                          #{column => Name, value => V}});
-                                        _ ->
-                                            tag_row_value(DT, V)
-                                    end,
-                              setelement(Idx, AccT, Val);
+                              setelement(Idx, AccT, row_value(Name, DT, V, fun tag_row_value/2));
                           _ ->
                               AccT
                       end
@@ -311,6 +269,43 @@ point_to_row_sparse(Timeunit, TsColumn, Point0, IndexMap) ->
                    Tags),
 
     #{values => erlang:tuple_to_list(T3)}.
+
+%% @private
+%% @doc Converts a field or tag value to row format against the column's schema,
+%% which may have been fixed by an earlier point in the batch.
+%%
+%% DECIMAL128 and JSON values carry hints that only reach the schema, and they
+%% are dropped here. A hinted value in a column of another type would lose its
+%% type silently (a legacy JSON value is a plain `string_value' on the wire), and
+%% a raw value in a DECIMAL128 or JSON column would be converted to the default
+%% FLOAT64/STRING, so both fail fast.
+row_value(Name, DT, #{value_data := VD} = V, _RawValueFun) ->
+    case hinted_datatype(V) of
+        HintedDT when HintedDT =:= undefined; HintedDT =:= DT ->
+            #{value_data => VD};
+        HintedDT ->
+            {Variant, _} = VD,
+            erlang:error({value_schema_mismatch,
+                          #{column => Name,
+                            schema_datatype => DT,
+                            value_datatype => HintedDT,
+                            value_variant => Variant}})
+    end;
+row_value(Name, 'DECIMAL128', V, _RawValueFun) ->
+    erlang:error({decimal128_requires_typed_value, #{column => Name, value => V}});
+row_value(Name, 'JSON', V, _RawValueFun) ->
+    erlang:error({json_requires_typed_value, #{column => Name, value => V}});
+row_value(_Name, DT, V, RawValueFun) ->
+    RawValueFun(DT, V).
+
+hinted_datatype(#{value_data := {decimal128_value, _}}) ->
+    'DECIMAL128';
+hinted_datatype(#{json_type := _}) ->
+    'JSON';
+hinted_datatype(#{value_data := {json_value, _}}) ->
+    'JSON';
+hinted_datatype(_V) ->
+    undefined.
 
 %% Column info functions (for schema creation)
 
