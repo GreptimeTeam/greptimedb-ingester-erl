@@ -323,6 +323,7 @@ Available type functions in `greptimedb_values`:
 * `timestamp_second_value/1`, `timestamp_millisecond_value/1`
 * `timestamp_microsecond_value/1`, `timestamp_nanosecond_value/1`
 * `decimal128_value/4` — `decimal128_value(Hi, Lo, Precision, Scale)`
+* `json_value/1`, `json2_value/1`
 
 `DECIMAL128` is stored as a 128-bit signed integer split into two `int64`
 halves. To reconstruct the logical value, mask each half to an unsigned
@@ -342,6 +343,50 @@ For example, `123.45` with precision 10 and scale 2:
 ```erlang
 greptimedb_values:decimal128_value(0, 12345, 10, 2).
 ```
+
+#### JSON and JSON2
+
+`json_value/1` writes a legacy `JSON` column. It takes encoded JSON text
+(binary or iodata). The server parses the text and rejects the request if it
+is not valid JSON.
+
+`json2_value/1` writes a `JSON2` column. It takes a decoded JSON term, in the
+representation returned by OTP's `json:decode/1` or `jsx:decode(Bin, [return_maps])`:
+
+| JSON | Erlang |
+|------|--------|
+| object | map with binary keys |
+| array | list |
+| string | binary |
+| number | integer or float |
+| `true` / `false` / `null` | `true` / `false` / `null` |
+
+Constraints for `json2_value/1`:
+
+* The top-level value must be a map. To write SQL NULL, omit the field from the point.
+* JSON2 values are only supported in fields. A JSON2 tag raises
+  `{json2_tag_not_supported, #{column := Name}}`.
+* Integers must be in the int64 or uint64 range.
+* Other terms raise `{invalid_json2_value, #{reason := Reason, value := Term}}`.
+* A table with a `JSON2` column must be append-only. When the table is created
+  on insertion, set `{grpc_hints, #{<<"append_mode">> => <<"true">>}}`.
+
+```erlang
+Points = [
+    #{fields => #{
+        <<"attrs">> => greptimedb_values:json_value(<<"{\"region\":\"eu\"}">>),
+        <<"payload">> => greptimedb_values:json2_value(#{<<"user">> => <<"alice">>,
+                                                         <<"tags">> => [<<"a">>, <<"b">>],
+                                                         <<"score">> => 9.5})
+      },
+      tags => #{<<"host">> => <<"h1">>},
+      timestamp => 1619775142098}
+].
+```
+
+Once a column is typed as `JSON` or `JSON2` in a batch, a raw value for that
+column in the same batch raises
+`{json_requires_typed_value, #{column := Name, value := Value}}`.
 
 ## Development
 
