@@ -48,7 +48,8 @@ all() ->
      t_insert_requests_json_raw_value_rejected,
      t_insert_requests_json2_tag_rejected,
      t_insert_requests_json_schema_mismatch,
-     t_write_json].
+     t_write_json,
+     t_write_stream_json].
 
 t_recover_stale_channel(_) ->
     Pool = greptimedb_stale_channel_pool,
@@ -1466,7 +1467,20 @@ t_insert_requests_json2_tag_rejected(_) ->
                  greptimedb_encoder:insert_requests(#{cli_opts => []}, [{"json2_tag", Points}])).
 
 t_write_json(_) ->
-    Metric = <<"table_json">>,
+    write_and_check_json(<<"table_json">>,
+                         greptimedb_client_pool_json,
+                         fun(Client, Metric, Points) -> greptimedb:write(Client, Metric, Points) end).
+
+t_write_stream_json(_) ->
+    write_and_check_json(<<"table_json_stream">>,
+                         greptimedb_stream_json_pool,
+                         fun(Client, Metric, Points) ->
+                            {ok, Stream} = greptimedb:write_stream(Client),
+                            ok = greptimedb_stream:write(Stream, Metric, Points),
+                            greptimedb_stream:finish(Stream)
+                         end).
+
+write_and_check_json(Metric, Pool, WriteFun) ->
     drop_table(Metric),
     Points =
         [#{fields =>
@@ -1482,19 +1496,18 @@ t_write_json(_) ->
            timestamp => 1619775142098}],
     Options =
         [{endpoints, [{http, greptime_host(), 4001}]},
-         {pool, greptimedb_client_pool_json},
-         {pool_size, 5},
+         {pool, Pool},
+         {pool_size, 1},
          %% JSON2 columns require an append-only table.
          {grpc_hints, #{<<"append_mode">> => <<"true">>}},
          {auth, {basic, #{username => ?GREPTIME_USERNAME, password => ?GREPTIME_PASSWORD}}}],
     {ok, Client} = greptimedb:start_client(Options),
-    true = greptimedb:is_alive(Client),
-    {ok, #{response := {affected_rows, #{value := 1}}}} =
-        greptimedb:write(Client, Metric, Points),
+    ok = wait_alive(Client),
+    {ok, #{response := {affected_rows, #{value := 1}}}} = WriteFun(Client, Metric, Points),
     greptimedb:stop_client(Client),
 
     [#{<<"records">> := #{<<"rows">> := [[_, <<"CREATE TABLE", _/binary>> = Ddl]]}}] =
-        jsx:decode(execute_sql_query(<<"SHOW CREATE TABLE table_json">>, <<"output">>),
+        jsx:decode(execute_sql_query(<<"SHOW CREATE TABLE ", Metric/binary>>, <<"output">>),
                    [return_maps]),
     ?assertMatch({match, _}, re:run(Ddl, <<"\"j1\" JSON NULL">>)),
     ?assertMatch({match, _}, re:run(Ddl, <<"\"j2\" JSON2\\(">>)),
@@ -1508,7 +1521,7 @@ t_write_json(_) ->
                                   <<"s">> := <<"你好"/utf8>>,
                                   <<"arr">> := [true, null, #{}],
                                   <<"obj">> := #{<<"k">> := false}}]]}}],
-                 jsx:decode(execute_sql_query(<<"SELECT j1, j2 FROM table_json">>, <<"output">>),
+                 jsx:decode(execute_sql_query(<<"SELECT j1, j2 FROM ", Metric/binary>>, <<"output">>),
                             [return_maps])).
 
 t_insert_requests_metric_formats(_) ->
